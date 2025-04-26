@@ -1,0 +1,61 @@
+{
+  "name": "next-intl-hlpr",
+  "displayName": "next-intl-hlpr",
+  "publisher": "felipestanzani",
+  "description": "Highlights missing translations in next-intl JSON files and shows missing languages on hover",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.79.0"
+  },
+  "categories": [
+    "Linters",
+    "Programming Languages"
+  ],
+  "keywords": [
+    "next-intl",
+    "i18n",
+    "translations",
+    "json",
+    "typescript"
+  ],
+  "activationEvents": [
+    "onLanguage:json"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "Next Intl Helper",
+      "properties": {
+        "nextIntlHlpr.translationsFolder": {
+          "type": "string",
+          "default": "messages",
+          "description": "Path to the folder containing translation files (relative to workspace root). Supports single files per language (e.g., messages/en.json) or subfolders (e.g., messages/en/common.json)."
+        },
+        "nextIntlHlpr.translationsMode": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "single-file",
+            "folder"
+          ],
+          "default": "auto",
+          "description": "Preferred mode for translation files. 'auto' detects based on folder contents, 'single-file' expects one JSON file per language (e.g., en.json), 'folder' expects language subfolders with JSON files (e.g., en/common.json)."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts"
+  },
+  "devDependencies": {
+    "@types/node": "^16.18.39",
+    "@types/vscode": "^1.79.0",
+    "@typescript-eslint/eslint-plugin": "^6.2.0",
+    "@typescript-eslint/parser": "^6.2.0",
+    "eslint": "^8.45.0",
+    "typescript": "^5.8.3"
+  }
+}
