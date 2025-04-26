@@ -1,6 +1,6 @@
 # next-intl-hlpr
 
-![next-intl-hlpr Logo](images/icon.png)
+![next-intl-hlpr Logo](images/banner.png)
 
 A VS Code extension to highlight missing translations in next-intl JSON files and show missing languages on hover.
 
