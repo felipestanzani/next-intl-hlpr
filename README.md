@@ -4,6 +4,8 @@
 
 A VS Code extension to highlight missing translations in next-intl JSON files and show missing languages on hover.
 
+Download at [VSCode Marketplace](https://marketplace.visualstudio.com/items?itemName=felipestanzani.next-intl-hlpr)
+
 ## Features
 
 - Highlights JSON keys missing in other language files, including nested properties (e.g., `nested.message`).
