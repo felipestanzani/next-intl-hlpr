@@ -3,7 +3,7 @@
   "displayName": "next-intl-hlpr",
   "publisher": "felipestanzani",
   "description": "Highlights missing translations in next-intl JSON files and shows missing languages on hover",
-  "version": "0.0.3",
+  "version": "0.0.2",
   "icon": "images/icon.png",
   "repository": {
     "type": "git",
@@ -62,8 +62,5 @@
     "@typescript-eslint/parser": "^6.2.0",
     "eslint": "^8.45.0",
     "typescript": "^5.8.3"
-  },
-  "dependencies": {
-    "jsonc-parser": "^3.3.1"
   }
 }

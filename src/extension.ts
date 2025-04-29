@@ -1,11 +1,18 @@
 import * as vscode from 'vscode'
 import * as fs from 'fs'
 import * as path from 'path'
+import { parseTree } from 'jsonc-parser'
 
 // Interface for translation JSON structure
 interface Translation {
   [key: string]: string | Translation
 }
+
+// Cache for translation data and key positions
+const documentCache = new Map<
+  string,
+  { translations: Map<string, Translation>; keyPositions: KeyPosition[] }
+>()
 
 // Activate the extension
 export function activate(context: vscode.ExtensionContext) {
@@ -27,44 +34,88 @@ export function activate(context: vscode.ExtensionContext) {
   )
   context.subscriptions.push(hoverProvider)
 
+  // Set up file system watcher for translation folder
+  const translationsFolder = getTranslationsFolder()
+  const watcher = vscode.workspace.createFileSystemWatcher(
+    new vscode.RelativePattern(
+      vscode.workspace.workspaceFolders?.[0] ?? '',
+      `${translationsFolder}/**/*.json`
+    )
+  )
+  context.subscriptions.push(watcher)
+
+  // Update diagnostics on file system changes
+  const updateAllJsonDiagnostics = () => {
+    documentCache.clear() // Invalidate cache
+    vscode.workspace.textDocuments.forEach((document) => {
+      if (
+        document.languageId === 'json' &&
+        document.fileName.endsWith('.json')
+      ) {
+        updateDiagnostics(document, diagnosticCollection)
+      }
+    })
+  }
+
+  watcher.onDidCreate(updateAllJsonDiagnostics)
+  watcher.onDidChange(updateAllJsonDiagnostics)
+  watcher.onDidDelete(updateAllJsonDiagnostics)
+
   // Update diagnostics when a JSON file is opened, saved, or configuration changes
   context.subscriptions.push(
     vscode.workspace.onDidOpenTextDocument((document) => {
-      if (document.languageId === 'json') {
+      if (
+        document.languageId === 'json' &&
+        document.fileName.endsWith('.json')
+      ) {
         updateDiagnostics(document, diagnosticCollection)
       }
     }),
     vscode.workspace.onDidChangeTextDocument((event) => {
-      if (event.document.languageId === 'json') {
+      if (
+        event.document.languageId === 'json' &&
+        event.document.fileName.endsWith('.json')
+      ) {
         updateDiagnostics(event.document, diagnosticCollection)
       }
     }),
     vscode.workspace.onDidCloseTextDocument((document) => {
-      if (document.languageId === 'json') {
+      if (
+        document.languageId === 'json' &&
+        document.fileName.endsWith('.json')
+      ) {
         diagnosticCollection.delete(document.uri)
+        documentCache.delete(document.uri.fsPath)
       }
     }),
-    vscode.workspace.onDidChangeConfiguration(() => {
-      vscode.workspace.textDocuments.forEach((document) => {
-        if (document.languageId === 'json') {
-          updateDiagnostics(document, diagnosticCollection)
-        }
-      })
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (
+        event.affectsConfiguration('nextIntlHlpr.translationsFolder') ||
+        event.affectsConfiguration('nextIntlHlpr.translationsMode')
+      ) {
+        documentCache.clear()
+        vscode.workspace.textDocuments.forEach((document) => {
+          if (
+            document.languageId === 'json' &&
+            document.fileName.endsWith('.json')
+          ) {
+            updateDiagnostics(document, diagnosticCollection)
+          }
+        })
+      }
     })
   )
 
   // Initial scan of open JSON files
   vscode.workspace.textDocuments.forEach((document) => {
-    if (document.languageId === 'json') {
+    if (document.languageId === 'json' && document.fileName.endsWith('.json')) {
       updateDiagnostics(document, diagnosticCollection)
     }
   })
 }
 
 // Deactivate the extension
-export function deactivate() {
-  // just for avoid sonarlint error
-}
+export function deactivate() {}
 
 // Get the configured translations folder
 function getTranslationsFolder(): string {
@@ -82,17 +133,19 @@ function getTranslationsMode(): string {
 function findTranslationsFolder(): string | undefined {
   const workspaceFolders = vscode.workspace.workspaceFolders
   if (!workspaceFolders) {
+    vscode.window.showWarningMessage('No workspace folder found.')
     return undefined
   }
 
-  const rootPath = workspaceFolders[0].uri.fsPath
   const translationsFolder = getTranslationsFolder()
-  const translationsPath = path.join(rootPath, translationsFolder)
-  if (
-    fs.existsSync(translationsPath) &&
-    fs.lstatSync(translationsPath).isDirectory()
-  ) {
-    return translationsPath
+  for (const folder of workspaceFolders) {
+    const translationsPath = path.join(folder.uri.fsPath, translationsFolder)
+    if (
+      fs.existsSync(translationsPath) &&
+      fs.lstatSync(translationsPath).isDirectory()
+    ) {
+      return translationsPath
+    }
   }
   return undefined
 }
@@ -123,6 +176,9 @@ function loadSingleTranslation(filePath: string): Translation {
     const content = fs.readFileSync(filePath, 'utf8')
     return JSON.parse(content)
   } catch (error) {
+    const errorMessage =
+      error instanceof Error ? error.message : 'Unknown error'
+    vscode.window.showErrorMessage(`Error parsing ${filePath}: ${errorMessage}`)
     console.error(`Error reading ${filePath}:`, error)
     return {}
   }
@@ -182,7 +238,7 @@ function getAllKeys(obj: Translation, prefix: string = ''): string[] {
   const keys: string[] = []
   for (const key in obj) {
     const fullKey = prefix ? `${prefix}.${key}` : key
-    if (typeof obj[key] === 'string') {
+    if (typeof obj[key] === 'string' && obj[key].trim() !== '') {
       keys.push(fullKey)
     } else if (typeof obj[key] === 'object' && obj[key] !== null) {
       keys.push(...getAllKeys(obj[key], fullKey))
@@ -230,7 +286,7 @@ function hasKey(obj: Translation, key: string): boolean {
     }
     current = current[part]
   }
-  return typeof current === 'string'
+  return typeof current === 'string' && current.trim() !== ''
 }
 
 // Interface for key position in JSON
@@ -242,71 +298,32 @@ interface KeyPosition {
 // Find all keys and their positions in the JSON document
 function findKeysInDocument(document: vscode.TextDocument): KeyPosition[] {
   const text = document.getText()
-  let parsed: Translation
-  try {
-    parsed = JSON.parse(text)
-  } catch (error) {
-    console.error('Error parsing JSON:', error)
+  const positions: KeyPosition[] = []
+  const tree = parseTree(text)
+  if (!tree) {
+    console.error('Error parsing JSON:', 'Invalid JSON')
     return []
   }
 
-  const positions: KeyPosition[] = []
-  const lines = text.split('\n')
-
-  function traverse(
-    obj: Translation,
-    prefix: string = '',
-    lineOffset: number = 0,
-    charOffset: number = 0
-  ) {
-    for (const key in obj) {
+  function traverse(node: any, prefix: string = '') {
+    if (node.type === 'property') {
+      const keyNode = node.children[0]
+      const valueNode = node.children[1]
+      const key = keyNode.value
       const fullKey = prefix ? `${prefix}.${key}` : key
-      const value = obj[key]
-
-      // Find the key in the text
-      const keyPattern = `"${key}"\\s*:`
-      let currentLine = lineOffset
-      let found = false
-      let keyStart: vscode.Position | undefined
-      let keyEnd: vscode.Position | undefined
-
-      while (currentLine < lines.length) {
-        const line = lines[currentLine]
-        const match = RegExp(keyPattern).exec(line)
-        if (match?.index !== undefined) {
-          keyStart = new vscode.Position(currentLine, match.index)
-          keyEnd = new vscode.Position(
-            currentLine,
-            match.index + key.length + 2
-          ) // Include quotes
-          found = true
-          break
-        }
-        currentLine++
+      const start = document.positionAt(keyNode.offset)
+      const end = document.positionAt(keyNode.offset + keyNode.length)
+      if (valueNode.type === 'string') {
+        positions.push({ key: fullKey, range: new vscode.Range(start, end) })
+      } else if (valueNode.type === 'object') {
+        traverse(valueNode, fullKey)
       }
-
-      if (found && keyStart && keyEnd) {
-        if (typeof value === 'string') {
-          positions.push({
-            key: fullKey,
-            range: new vscode.Range(keyStart, keyEnd)
-          })
-        } else if (typeof value === 'object' && value !== null) {
-          // Recursively traverse nested objects
-          const nextLine = currentLine + 1
-          const nextCharOffset = lines[currentLine].indexOf('{') + 1
-          traverse(value, fullKey, nextLine, nextCharOffset)
-        }
-      }
-
-      // Update offsets for the next key
-      if (found) {
-        lineOffset = currentLine
-      }
+    } else if (node.type === 'object' && node.children) {
+      node.children.forEach((child: any) => traverse(child, prefix))
     }
   }
 
-  traverse(parsed)
+  traverse(tree)
   return positions
 }
 
@@ -321,7 +338,7 @@ function updateDiagnostics(
 
   const translationsPath = findTranslationsFolder()
   if (!translationsPath) {
-    collection.clear()
+    collection.delete(document.uri)
     return
   }
 
@@ -331,17 +348,16 @@ function updateDiagnostics(
 
   // Determine the language and file name
   const translationsFolder = getTranslationsFolder()
-  const relativePath = path.relative(
-    path.join(
-      vscode.workspace.workspaceFolders![0].uri.fsPath,
-      translationsFolder
-    ),
-    document.fileName
+  const translationsFolderPath = path.join(
+    vscode.workspace.workspaceFolders![0].uri.fsPath,
+    translationsFolder
   )
+  const relativePath = path.relative(translationsFolderPath, document.fileName)
 
   if (isSingleFile) {
     // Single-file mode: language is the file name without .json
-    if (!RegExp(/^[./\\]*$/).exec(path.dirname(relativePath))) {
+    const fileDir = path.dirname(document.fileName)
+    if (path.normalize(fileDir) !== path.normalize(translationsFolderPath)) {
       return // File is not directly in translationsFolder
     }
     lang = path.basename(document.fileName, '.json')
@@ -352,7 +368,7 @@ function updateDiagnostics(
       return // Not in a language subfolder
     }
     lang = pathParts[0]
-    fileName = pathParts.slice(1).join(path.sep) // e.g., "view.json"
+    fileName = pathParts.slice(1).join(path.sep) // e.g., "apiMessage.json"
   }
 
   // Load translations (pass fileName in folder mode to compare equivalent files only)
@@ -361,9 +377,6 @@ function updateDiagnostics(
     isSingleFile,
     fileName
   )
-  const missingTranslations = findMissingTranslations(translations)
-
-  const diagnostics: vscode.Diagnostic[] = []
   const translation = translations.get(lang)
   if (!translation) {
     return
@@ -371,7 +384,9 @@ function updateDiagnostics(
 
   // Find all keys and their positions in the document
   const keyPositions = findKeysInDocument(document)
+  const missingTranslations = findMissingTranslations(translations)
 
+  const diagnostics: vscode.Diagnostic[] = []
   for (const { key, range } of keyPositions) {
     const missingLangs = missingTranslations.get(key)
     if (missingLangs && !missingLangs.includes(lang)) {
@@ -385,6 +400,8 @@ function updateDiagnostics(
     }
   }
 
+  // Update cache
+  documentCache.set(document.uri.fsPath, { translations, keyPositions })
   collection.set(document.uri, diagnostics)
 }
 
@@ -397,40 +414,14 @@ function provideHoverInfo(
     return undefined
   }
 
-  const translationsPath = findTranslationsFolder()
-  if (!translationsPath) {
+  const cache = documentCache.get(document.uri.fsPath)
+  if (!cache) {
     return undefined
   }
 
-  const isSingleFile = isSingleFileMode(translationsPath)
-  let fileName: string | undefined
-
-  if (!isSingleFile) {
-    const translationsFolder = getTranslationsFolder()
-    const relativePath = path.relative(
-      path.join(
-        vscode.workspace.workspaceFolders![0].uri.fsPath,
-        translationsFolder
-      ),
-      document.fileName
-    )
-    const pathParts = relativePath.split(path.sep)
-    if (pathParts.length >= 2) {
-      fileName = pathParts.slice(1).join(path.sep) // e.g., "view.json"
-    }
-  }
-
-  const translations = loadTranslations(
-    translationsPath,
-    isSingleFile,
-    fileName
-  )
+  const { translations, keyPositions } = cache
   const missingTranslations = findMissingTranslations(translations)
 
-  // Find all keys and their positions
-  const keyPositions = findKeysInDocument(document)
-
-  // Find the key at the cursor position
   const hoveredKeyPosition = keyPositions.find((kp) =>
     kp.range.contains(position)
   )
