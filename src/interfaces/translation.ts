@@ -1,7 +1,8 @@
 import * as vscode from 'vscode'
 
 export interface Translation {
-  [key: string]: string | Translation
+  locale: string
+  messages: Map<string, string>
 }
 
 export interface KeyPosition {
@@ -15,14 +16,9 @@ export interface TranslationCache {
 }
 
 export interface ITranslationService {
-  loadTranslations(
-    translationsPath: string,
-    isSingleFile: boolean,
-    fileName?: string
-  ): Map<string, Translation>
-  findMissingTranslations(
-    translations: Map<string, Translation>
-  ): Map<string, string[]>
-  hasKey(obj: Translation, key: string): boolean
-  getAllKeys(obj: Translation, prefix?: string): string[]
+  initialize(): Promise<void>
+  getTranslation(locale: string): Translation | undefined
+  getAllTranslations(): Translation[]
+  findMissingTranslations(key: string): Promise<string[]>
+  dispose(): void
 }
