@@ -1,14 +1,14 @@
-import * as vscode from 'vscode'
-import * as fs from 'fs'
-import * as path from 'path'
-import { Logger } from '../utils/logger'
-import { ConfigService } from './configService'
-import { Translation, ITranslationService } from '../interfaces/translation'
-import { NextIntlConfig, MessageConfig } from '../interfaces/nextIntlConfig'
+import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
+import {Logger} from '../utils/logger';
+import {ConfigService} from './configService';
+import {Translation, ITranslationService} from '../interfaces/translation';
+import {NextIntlConfig, MessageConfig} from '../interfaces/nextIntlConfig';
 
 export class TranslationService implements ITranslationService {
-  private translations: Map<string, Translation> = new Map()
-  private fileWatcher: vscode.FileSystemWatcher | undefined
+  private readonly translations: Map<string, Translation> = new Map();
+  private fileWatcher: vscode.FileSystemWatcher | undefined;
 
   constructor(
     private readonly logger: Logger,
@@ -16,20 +16,20 @@ export class TranslationService implements ITranslationService {
   ) {}
 
   async initialize(): Promise<void> {
-    const config = await this.configService.getNextIntlConfig()
+    const config = await this.configService.getNextIntlConfig();
     if (!config) {
-      this.logger.log('No next-intl configuration found')
-      return
+      this.logger.log('No next-intl configuration found');
+      return;
     }
 
-    const messageConfig = this.configService.getMessageConfig()
+    const messageConfig = this.configService.getMessageConfig();
     if (!messageConfig) {
-      this.logger.log('No message configuration found')
-      return
+      this.logger.log('No message configuration found');
+      return;
     }
 
-    await this.loadTranslations(config, messageConfig)
-    this.setupFileWatcher(config.messagesPath)
+    await this.loadTranslations(config, messageConfig);
+    this.setupFileWatcher(config.messagesPath);
   }
 
   private async loadTranslations(
@@ -37,37 +37,45 @@ export class TranslationService implements ITranslationService {
     messageConfig: MessageConfig
   ): Promise<void> {
     try {
-      this.translations.clear()
+      this.translations.clear();
 
-      for (const locale of config.locales) {
+      const messagesDir = path.dirname(path.dirname(config.requestPath));
+      const files = await fs.promises.readdir(
+        path.join(messagesDir, 'messages')
+      );
+      const locales = files
+        .filter((file) => file.endsWith('.json'))
+        .map((file) => file.replace('.json', ''));
+
+      this.logger.log(`Detected locales from files: ${locales.join(', ')}`);
+
+      for (const locale of locales) {
         const translation: Translation = {
           locale,
           messages: new Map()
-        }
+        };
 
         const filePath = this.resolveMessagePath(
-          path.dirname(path.dirname(config.requestPath)),
+          messagesDir,
           locale,
           messageConfig
-        )
-        this.logger.log(`Loading translations from: ${filePath}`)
+        );
+        this.logger.log(`Loading translations from: ${filePath}`);
 
         if (fs.existsSync(filePath)) {
-          const content = await fs.promises.readFile(filePath, 'utf8')
-          const messages = JSON.parse(content)
-          this.addMessagesToTranslation(translation, messages)
+          const content = await fs.promises.readFile(filePath, 'utf8');
+          const messages = JSON.parse(content);
+          this.addMessagesToTranslation(translation, messages);
         } else {
-          this.logger.log(`Translation file not found: ${filePath}`)
+          this.logger.log(`Translation file not found: ${filePath}`);
         }
 
-        this.translations.set(locale, translation)
+        this.translations.set(locale, translation);
       }
 
-      this.logger.log(
-        `Loaded translations for ${config.locales.length} locales`
-      )
+      this.logger.log(`Loaded translations for ${locales.length} locales`);
     } catch (error) {
-      this.logger.log('Error loading translations', error)
+      this.logger.log('Error loading translations', error);
     }
   }
 
@@ -76,8 +84,8 @@ export class TranslationService implements ITranslationService {
     locale: string,
     messageConfig: MessageConfig
   ): string {
-    const loadPath = messageConfig.loadPath.replace('${locale}', locale)
-    return path.join(basePath, loadPath)
+    const loadPath = messageConfig.loadPath.replace('${locale}', locale);
+    return path.join(basePath, loadPath);
   }
 
   private addMessagesToTranslation(
@@ -86,145 +94,184 @@ export class TranslationService implements ITranslationService {
     prefix = ''
   ): void {
     for (const [key, value] of Object.entries(messages)) {
-      const fullKey = prefix ? `${prefix}.${key}` : key
+      const fullKey = prefix ? `${prefix}.${key}` : key;
       if (typeof value === 'object' && value !== null) {
-        this.addMessagesToTranslation(translation, value, fullKey)
+        this.addMessagesToTranslation(translation, value, fullKey);
       } else {
-        translation.messages.set(fullKey, String(value))
+        translation.messages.set(fullKey, String(value));
       }
     }
   }
 
   private setupFileWatcher(messagesPath: string): void {
     if (this.fileWatcher) {
-      this.fileWatcher.dispose()
+      this.fileWatcher.dispose();
     }
 
-    const projectRoot = path.dirname(path.dirname(messagesPath))
-    const messagesDir = path.join(projectRoot, 'messages')
-    this.logger.log(`Setting up file watcher for: ${messagesDir}`)
+    const projectRoot = path.dirname(path.dirname(messagesPath));
+    const messagesDir = path.join(projectRoot, 'messages');
+    this.logger.log(`Setting up file watcher for: ${messagesDir}`);
 
     this.fileWatcher = vscode.workspace.createFileSystemWatcher(
       new vscode.RelativePattern(messagesDir, '**/*.json'),
       false,
       false,
       false
-    )
+    );
 
     this.fileWatcher.onDidChange(async () => {
-      const config = await this.configService.getNextIntlConfig()
-      const messageConfig = this.configService.getMessageConfig()
+      const config = await this.configService.getNextIntlConfig();
+      const messageConfig = this.configService.getMessageConfig();
       if (config && messageConfig) {
-        await this.loadTranslations(config, messageConfig)
+        await this.loadTranslations(config, messageConfig);
       }
-    })
+    });
+
+    this.fileWatcher.onDidCreate(async () => {
+      const config = await this.configService.getNextIntlConfig();
+      const messageConfig = this.configService.getMessageConfig();
+      if (config && messageConfig) {
+        await this.loadTranslations(config, messageConfig);
+      }
+    });
   }
 
   getTranslation(locale: string): Translation | undefined {
-    return this.translations.get(locale)
+    return this.translations.get(locale);
   }
 
   getAllTranslations(): Translation[] {
-    return Array.from(this.translations.values())
+    return Array.from(this.translations.values());
   }
 
   async findMissingTranslations(key: string): Promise<string[]> {
-    const missingLocales: string[] = []
-    const config = await this.configService.getNextIntlConfig()
-    const messageConfig = this.configService.getMessageConfig()
+    const missingLocales: string[] = [];
+    const config = await this.configService.getNextIntlConfig();
+    const messageConfig = this.configService.getMessageConfig();
 
     if (!config || !messageConfig) {
-      return missingLocales
+      return missingLocales;
     }
 
-    // Get the current file's locale from the key
-    const currentLocale = this.getCurrentLocale(key)
+    const currentLocale = this.getCurrentLocale(key);
     if (!currentLocale) {
-      return missingLocales
+      return missingLocales;
     }
 
     this.logger.log(
       `Checking translations for key "${key}" in locale "${currentLocale}"`
-    )
+    );
 
-    // First, check if this key exists in all other locales
-    for (const locale of config.locales) {
-      if (locale === currentLocale) {
-        continue
-      }
-
-      const translation = this.translations.get(locale)
-      if (!translation || !translation.messages.has(key)) {
-        this.logger.log(`Key "${key}" is missing in locale "${locale}"`)
-        missingLocales.push(locale)
-      }
-    }
-
-    // Then, check if any keys from other locales are missing in the current locale
-    const currentTranslation = this.translations.get(currentLocale)
-    if (currentTranslation) {
-      for (const locale of config.locales) {
-        if (locale === currentLocale) {
-          continue
-        }
-
-        const otherTranslation = this.translations.get(locale)
-        if (otherTranslation) {
-          // Get all keys from the other locale
-          const otherKeys = Array.from(otherTranslation.messages.keys())
-
-          // Check each key from the other locale
-          for (const otherKey of otherKeys) {
-            if (!currentTranslation.messages.has(otherKey)) {
-              this.logger.log(
-                `Key "${otherKey}" from locale "${locale}" is missing in "${currentLocale}"`
-              )
-              if (!missingLocales.includes(locale)) {
-                missingLocales.push(locale)
-              }
-            }
-          }
-        }
-      }
-    }
+    this.checkKeyInOtherLocales(
+      key,
+      currentLocale,
+      config.locales,
+      missingLocales
+    );
+    this.checkOtherKeysInCurrentLocale(
+      currentLocale,
+      config.locales,
+      missingLocales
+    );
 
     this.logger.log(
       `Found missing translations in locales: ${missingLocales.join(', ')}`
-    )
-    return missingLocales
+    );
+    return missingLocales;
+  }
+
+  private checkKeyInOtherLocales(
+    key: string,
+    currentLocale: string,
+    locales: string[],
+    missingLocales: string[]
+  ): void {
+    for (const locale of locales) {
+      if (locale === currentLocale) continue;
+
+      const translation = this.translations.get(locale);
+      if (!translation?.messages.has(key)) {
+        this.logger.log(`Key "${key}" is missing in locale "${locale}"`);
+        missingLocales.push(locale);
+      }
+    }
+  }
+
+  private checkOtherKeysInCurrentLocale(
+    currentLocale: string,
+    locales: string[],
+    missingLocales: string[]
+  ): void {
+    const currentTranslation = this.translations.get(currentLocale);
+    if (!currentTranslation) return;
+
+    for (const locale of locales) {
+      if (locale === currentLocale) continue;
+
+      const otherTranslation = this.translations.get(locale);
+      if (!otherTranslation) continue;
+
+      this.checkMissingKeysInCurrentLocale(
+        currentTranslation,
+        otherTranslation,
+        locale,
+        currentLocale,
+        missingLocales
+      );
+    }
+  }
+
+  private checkMissingKeysInCurrentLocale(
+    currentTranslation: Translation,
+    otherTranslation: Translation,
+    locale: string,
+    currentLocale: string,
+    missingLocales: string[]
+  ): void {
+    const otherKeys = Array.from(otherTranslation.messages.keys());
+    for (const otherKey of otherKeys) {
+      if (!currentTranslation.messages.has(otherKey)) {
+        this.logger.log(
+          `Key "${otherKey}" from locale "${locale}" is missing in "${currentLocale}"`
+        );
+        if (!missingLocales.includes(locale)) {
+          missingLocales.push(locale);
+        }
+      }
+    }
   }
 
   private getCurrentLocale(key: string): string | undefined {
     // Try to find the locale by checking which translation file contains this key
     for (const [locale, translation] of this.translations.entries()) {
       if (translation.messages.has(key)) {
-        this.logger.log(`Found key "${key}" in locale "${locale}"`)
-        return locale
+        this.logger.log(`Found key "${key}" in locale "${locale}"`);
+        return locale;
       }
     }
-    this.logger.log(`Key "${key}" not found in any locale`)
-    return undefined
+    this.logger.log(`Key "${key}" not found in any locale`);
+    return undefined;
   }
 
   async reloadTranslations(): Promise<void> {
-    this.logger.log('Reloading translations')
-    this.translations.clear()
-    const config = await this.configService.getNextIntlConfig()
+    this.logger.log('Reloading translations');
+    this.translations.clear();
+    const config = await this.configService.getNextIntlConfig();
     if (!config) {
-      return
+      return;
     }
 
-    const messageConfig = this.configService.getMessageConfig()
+    const messageConfig = this.configService.getMessageConfig();
     if (!messageConfig) {
-      return
+      return;
     }
 
-    await this.loadTranslations(config, messageConfig)
+    await this.loadTranslations(config, messageConfig);
   }
 
   dispose(): void {
     if (this.fileWatcher) {
-      this.fileWatcher.dispose()
+      this.fileWatcher.dispose();
     }
   }
 }

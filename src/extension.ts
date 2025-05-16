@@ -20,6 +20,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
   // Initialize services
   await translationService.initialize();
+  await diagnosticService.setupFileWatcher();
 
   // Register hover provider
   const hoverProvider = new HoverProvider(translationService);
@@ -42,6 +43,8 @@ export async function activate(context: vscode.ExtensionContext) {
 
   fileWatcher.onDidCreate(async (uri) => {
     const document = await vscode.workspace.openTextDocument(uri);
+    // Reinitialize translation service to include the new language
+    await translationService.initialize();
     await diagnosticService.updateDiagnostics(document);
   });
 
