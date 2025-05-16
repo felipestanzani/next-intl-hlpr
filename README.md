@@ -10,6 +10,10 @@ Download at [VSCode Marketplace](https://marketplace.visualstudio.com/items?item
 
 - Highlights JSON keys missing in other language files, including nested properties (e.g., `nested.message`).
 - Shows missing languages on hover for warned keys.
+- Groups missing translations for better readability:
+  - Missing translations are grouped by key, showing all missing locales in a single warning
+  - Missing nested translations are grouped by parent key, showing all missing keys per locale
+  - Clear and concise warning messages format
 - Supports two translation file structures:
   - **Single-File Mode**: One JSON file per language (e.g., `messages/en.json`, `messages/de.json`).
   - **Folder Mode**: Language-specific subfolders with multiple JSON files (e.g., `messages/en/common.json`, `messages/en/errors.json`).
@@ -104,7 +108,7 @@ If migrating from single-file to folder mode:
 ```json
 {
   "greeting": "Hello",
-  "nested": { "message": "Nested message" }
+  "nested": {"message": "Nested message"}
 }
 ```
 
@@ -131,7 +135,7 @@ Missing languages: `de`
 ```json
 {
   "greeting": "Hello",
-  "nested": { "message": "Nested message" }
+  "nested": {"message": "Nested message"}
 }
 ```
 
@@ -167,7 +171,7 @@ Renaming `common.json` to `newCommon.json` will automatically update diagnostics
   - Ensure the translations folder exists and is correctly configured (`nextIntlHlpr.translationsFolder`).
   - Verify the file structure matches the mode (`single-file` or `folder`).
   - Check the VS Code console (`Developer: Toggle Developer Tools`) for errors.
-- **Diagnostics don’t update after renaming files**:
+- **Diagnostics don't update after renaming files**:
   - Ensure a workspace folder is open.
   - Restart VS Code to reinitialize the file system watcher if changes are not detected.
 - **Errors about malformed JSON**:
@@ -188,7 +192,7 @@ Renaming `common.json` to `newCommon.json` will automatically update diagnostics
 #### Bug Fixes
 
 - **Fixed Production Failure**: Resolved an issue where the extension failed to activate in production due to a missing `jsonc-parser` dependency (`Cannot find module 'jsonc-parser'`). The extension now works reliably when installed as a `.vsix` or from the VSCode Marketplace.
-- **Removed `jsonc-parser` Dependency**: Replaced `jsonc-parser` with Node’s built-in `JSON.parse` for parsing translation JSON files, eliminating external dependencies and simplifying bundling. This ensures compatibility with standard JSON files but requires valid JSON (no comments or trailing commas).
+- **Removed `jsonc-parser` Dependency**: Replaced `jsonc-parser` with Node's built-in `JSON.parse` for parsing translation JSON files, eliminating external dependencies and simplifying bundling. This ensures compatibility with standard JSON files but requires valid JSON (no comments or trailing commas).
 
 #### Improvements
 
