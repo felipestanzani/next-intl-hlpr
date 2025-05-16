@@ -176,16 +176,7 @@ export class DiagnosticService {
     currentTranslation: any,
     missingTranslationsByKey: Map<string, Set<string>>
   ) {
-    for (const [key] of translation.messages) {
-      if (!currentTranslation.messages.has(key)) {
-        this.addMissingTranslation(
-          key,
-          translation.locale,
-          missingTranslationsByKey
-        );
-      }
-    }
-
+    // Only check for missing translations in the current file's keys
     for (const [key] of currentTranslation.messages) {
       if (!translation.messages.has(key)) {
         this.addMissingTranslation(

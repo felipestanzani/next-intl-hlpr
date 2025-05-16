@@ -4,6 +4,7 @@ import {ConfigService} from './services/configService';
 import {TranslationService} from './services/translationService';
 import {DiagnosticService} from './services/diagnosticService';
 import {HoverProvider} from './providers/hoverProvider';
+import * as path from 'path';
 
 // Activate the extension
 export async function activate(context: vscode.ExtensionContext) {
@@ -29,8 +30,21 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   // Set up file watchers
+  const config = await configService.getNextIntlConfig();
+  const messageConfig = configService.getMessageConfig();
+
+  if (!config || !messageConfig) {
+    logger.log('No next-intl configuration found, skipping file watcher setup');
+    return;
+  }
+
+  const messagesDir = path.join(
+    path.dirname(config.requestPath),
+    messageConfig.loadPath.split('/').slice(0, -1).join('/')
+  );
+
   const fileWatcher = vscode.workspace.createFileSystemWatcher(
-    '**/*.json',
+    path.join(messagesDir, '**/*.json'),
     false,
     false,
     false
