@@ -408,16 +408,85 @@ export class DiagnosticService {
   ): vscode.Range | undefined {
     const text = document.getText();
     const keyParts = key.split('.');
-    const lastKey = keyParts[keyParts.length - 1];
 
-    const keyPattern = new RegExp(`"${lastKey}"\\s*:`, 'g');
-    const match = keyPattern.exec(text);
+    if (keyParts.length === 1) {
+      // Simple key, search for it directly
+      const keyPattern = new RegExp(`"${keyParts[0]}"\\s*:`, 'g');
+      const match = keyPattern.exec(text);
+      if (!match) return undefined;
 
-    if (!match) return undefined;
+      const startPos = document.positionAt(match.index);
+      const endPos = document.positionAt(match.index + match[0].length);
+      return new vscode.Range(startPos, endPos);
+    }
 
-    const startPos = document.positionAt(match.index);
-    const endPos = document.positionAt(match.index + match[0].length);
-    return new vscode.Range(startPos, endPos);
+    // For nested keys, search for the specific key in its proper path context
+    try {
+      const content = JSON.parse(text);
+
+      // Check if the key exists in the parsed content
+      let currentObj = content;
+      for (let i = 0; i < keyParts.length - 1; i++) {
+        const part = keyParts[i];
+        if (!currentObj[part] || typeof currentObj[part] !== 'object') {
+          return undefined;
+        }
+        currentObj = currentObj[part];
+      }
+
+      const lastKey = keyParts[keyParts.length - 1];
+      if (!(lastKey in currentObj)) {
+        return undefined;
+      }
+
+      // Search for the key by looking for each part in sequence
+      return this.findNestedKeyInText(document, text, keyParts);
+    } catch (error) {
+      // Fallback to simple search if JSON parsing fails
+      const lastKey = keyParts[keyParts.length - 1];
+      const keyPattern = new RegExp(`"${lastKey}"\\s*:`, 'g');
+      const match = keyPattern.exec(text);
+
+      if (!match) return undefined;
+
+      const startPos = document.positionAt(match.index);
+      const endPos = document.positionAt(match.index + match[0].length);
+      return new vscode.Range(startPos, endPos);
+    }
+  }
+
+  private findNestedKeyInText(
+    document: vscode.TextDocument,
+    text: string,
+    keyParts: string[]
+  ): vscode.Range | undefined {
+    let searchStartIndex = 0;
+
+    // Navigate through each level of nesting
+    for (let i = 0; i < keyParts.length; i++) {
+      const currentKey = keyParts[i];
+      const keyPattern = new RegExp(`"${currentKey}"\\s*:`, 'g');
+      keyPattern.lastIndex = searchStartIndex;
+
+      const match = keyPattern.exec(text);
+      if (!match) return undefined;
+
+      // If this is the last key part, we found our target
+      if (i === keyParts.length - 1) {
+        return new vscode.Range(
+          document.positionAt(match.index),
+          document.positionAt(match.index + match[0].length)
+        );
+      }
+
+      // For intermediate keys, find the opening brace and continue searching from there
+      let braceIndex = text.indexOf('{', match.index + match[0].length);
+      if (braceIndex === -1) return undefined;
+
+      searchStartIndex = braceIndex + 1;
+    }
+
+    return undefined;
   }
 
   private createMissingTranslationMessage(
