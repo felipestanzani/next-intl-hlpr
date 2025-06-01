@@ -52,15 +52,28 @@
     "compile": "tsc -p ./",
     "build": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "lint": "eslint src --ext ts"
+    "lint": "eslint src --ext ts",
+    "test": "vscode-test",
+    "test:unit": "mocha out/test/**/*.test.js --require ./test-setup.js --ui bdd",
+    "test:coverage": "nyc npm run test:unit",
+    "pretest": "npm run compile && npm run lint",
+    "test:watch": "npm run compile && npm run test:unit -- --watch"
   },
   "devDependencies": {
     "@types/node": "^22.15.18",
     "@types/vscode": "^1.100.0",
     "@typescript-eslint/eslint-plugin": "^8.32.1",
     "@typescript-eslint/parser": "^8.32.1",
+    "@types/mocha": "^10.0.6",
+    "@types/sinon": "^17.0.3",
+    "@vscode/test-cli": "^0.0.8",
+    "@vscode/test-electron": "^2.3.9",
+    "@istanbuljs/nyc-config-typescript": "^1.0.2",
     "eslint": "^9.26.0",
+    "mocha": "^10.2.0",
+    "nyc": "^15.1.0",
     "prettier": "3.5.3",
+    "sinon": "^17.0.1",
     "typescript": "^5.8.3"
   },
   "dependencies": {
