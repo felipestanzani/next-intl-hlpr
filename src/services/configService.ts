@@ -184,9 +184,13 @@ export class ConfigService {
         `Reading next.config content: ${content.substring(0, 200)}...`
       );
 
-      // Check if createNextIntlPlugin is used
+      // Check if createNextIntlPlugin is used in various patterns:
+      // 1. createNextIntlPlugin({ ... }) - direct call with config
+      // 2. createNextIntlPlugin()({ ... }) - plugin factory pattern
+      // 3. const withNextIntl = createNextIntlPlugin() - assignment to variable (most common)
+      // 4. const withNextIntl = createNextIntlPlugin({ ... }) - assignment with config
       const createNextIntlPluginMatch = content.match(
-        /createNextIntlPlugin\(([\s\S]*?)\)/
+        /createNextIntlPlugin\(\s*\)\s*\(\s*(\{[\s\S]*?\})\s*\)|createNextIntlPlugin\(\s*(\{[\s\S]*?\})\s*\)|createNextIntlPlugin\s*\(\s*([^)]*)\s*\)/
       );
 
       if (!createNextIntlPluginMatch) {
@@ -194,32 +198,30 @@ export class ConfigService {
         return undefined;
       }
 
-      const configContent = createNextIntlPluginMatch[1];
+      // Get the config content from any capture group
+      const configContent =
+        createNextIntlPluginMatch[1] ||
+        createNextIntlPluginMatch[2] ||
+        createNextIntlPluginMatch[3];
       this.logger.log(`Found createNextIntlPlugin config: ${configContent}`);
 
-      // If createNextIntlPlugin is called without parameters, try to find locales in the request.ts file
-      if (!configContent.trim()) {
+      // If createNextIntlPlugin is called without parameters or with non-object parameters,
+      // try to find locales in the request.ts file
+      if (
+        !configContent ||
+        !configContent.trim() ||
+        !configContent.includes('{')
+      ) {
         this.logger.log(
-          'createNextIntlPlugin called without parameters, checking request.ts'
+          'createNextIntlPlugin called without object parameters, will detect locales from messages directory'
         );
-        const requestPath = path.join(
-          path.dirname(configPath),
-          'i18n',
-          'request.ts'
-        );
-        if (fs.existsSync(requestPath)) {
-          const requestContent = fs.readFileSync(requestPath, 'utf8');
-          const localeMatch = requestContent.match(
-            /locale\s*=\s*['"]([^'"]+)['"]/
-          );
-          if (localeMatch) {
-            return {
-              locales: [localeMatch[1]],
-              defaultLocale: localeMatch[1]
-            };
-          }
-        }
-        return undefined;
+
+        // For configurations without explicit locale config, we'll detect locales from the messages directory
+        // This is the standard pattern when using next-intl without explicit routing configuration
+        return {
+          locales: [], // Will be populated by detectLocales
+          defaultLocale: 'en' // Default fallback
+        };
       }
 
       const localesMatch = configContent.match(/locales:\s*\[([\s\S]*?)\]/);

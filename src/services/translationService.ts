@@ -43,6 +43,13 @@ export class TranslationService implements ITranslationService {
       const files = await fs.promises.readdir(
         path.join(messagesDir, 'messages')
       );
+
+      // Check if files is defined and is an array
+      if (!files || !Array.isArray(files)) {
+        this.logger.log('No files found in messages directory');
+        return;
+      }
+
       const locales = files
         .filter((file) => file.endsWith('.json'))
         .map((file) => file.replace('.json', ''));
@@ -187,7 +194,9 @@ export class TranslationService implements ITranslationService {
     missingLocales: string[]
   ): void {
     for (const locale of locales) {
-      if (locale === currentLocale) {continue;}
+      if (locale === currentLocale) {
+        continue;
+      }
 
       const translation = this.translations.get(locale);
       if (!translation?.messages.has(key)) {
@@ -203,13 +212,19 @@ export class TranslationService implements ITranslationService {
     missingLocales: string[]
   ): void {
     const currentTranslation = this.translations.get(currentLocale);
-    if (!currentTranslation) {return;}
+    if (!currentTranslation) {
+      return;
+    }
 
     for (const locale of locales) {
-      if (locale === currentLocale) {continue;}
+      if (locale === currentLocale) {
+        continue;
+      }
 
       const otherTranslation = this.translations.get(locale);
-      if (!otherTranslation) {continue;}
+      if (!otherTranslation) {
+        continue;
+      }
 
       this.checkMissingKeysInCurrentLocale(
         currentTranslation,

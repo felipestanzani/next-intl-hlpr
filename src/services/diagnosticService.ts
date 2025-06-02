@@ -3,6 +3,7 @@ import * as path from 'path';
 import {Logger} from '../utils/logger';
 import {TranslationService} from './translationService';
 import {ConfigService} from './configService';
+import {NextIntlConfig, MessageConfig} from '../interfaces/nextIntlConfig';
 
 export class DiagnosticService {
   private readonly diagnosticCollection: vscode.DiagnosticCollection;
@@ -77,16 +78,18 @@ export class DiagnosticService {
         return;
       }
 
+      const messageConfig = this.configService.getMessageConfig();
+      if (!messageConfig) {
+        return;
+      }
+
       // Get all translations to determine available locales
       const allTranslations = this.translationService.getAllTranslations();
       const locales = allTranslations.map((t) => t.locale);
 
       // Update diagnostics for all translation files
       for (const locale of locales) {
-        const filePath = path.join(
-          path.dirname(document.uri.fsPath),
-          `${locale}.json`
-        );
+        const filePath = this.resolveMessagePath(config, messageConfig, locale);
         const uri = vscode.Uri.file(filePath);
 
         try {
@@ -106,13 +109,17 @@ export class DiagnosticService {
     document: vscode.TextDocument
   ): Promise<void> {
     const currentLocale = this.getCurrentLocale(document.uri.fsPath);
-    if (!currentLocale) {return;}
+    if (!currentLocale) {
+      return;
+    }
 
     const allTranslations = this.translationService.getAllTranslations();
     const currentTranslation = allTranslations.find(
       (t) => t.locale === currentLocale
     );
-    if (!currentTranslation) {return;}
+    if (!currentTranslation) {
+      return;
+    }
 
     const currentContent = JSON.parse(document.getText());
     const currentKeys = this.getAllKeys(currentContent);
@@ -152,7 +159,9 @@ export class DiagnosticService {
     const allTranslations = this.translationService.getAllTranslations();
 
     for (const translation of allTranslations) {
-      if (translation.locale === currentLocale) {continue;}
+      if (translation.locale === currentLocale) {
+        continue;
+      }
 
       this.checkMissingTranslations(
         translation,
@@ -205,9 +214,16 @@ export class DiagnosticService {
     document: vscode.TextDocument,
     missingNestedKeysByParent: Map<string, Map<string, Set<string>>>
   ) {
-    const otherFilePath = path.join(
-      path.dirname(document.uri.fsPath),
-      `${translation.locale}.json`
+    const config = await this.configService.getNextIntlConfig();
+    const messageConfig = this.configService.getMessageConfig();
+    if (!config || !messageConfig) {
+      return;
+    }
+
+    const otherFilePath = this.resolveMessagePath(
+      config,
+      messageConfig,
+      translation.locale
     );
     const otherContent = JSON.parse(
       Buffer.from(
@@ -413,7 +429,9 @@ export class DiagnosticService {
       // Simple key, search for it directly
       const keyPattern = new RegExp(`"${keyParts[0]}"\\s*:`, 'g');
       const match = keyPattern.exec(text);
-      if (!match) {return undefined;}
+      if (!match) {
+        return undefined;
+      }
 
       const startPos = document.positionAt(match.index);
       const endPos = document.positionAt(match.index + match[0].length);
@@ -447,7 +465,9 @@ export class DiagnosticService {
       const keyPattern = new RegExp(`"${lastKey}"\\s*:`, 'g');
       const match = keyPattern.exec(text);
 
-      if (!match) {return undefined;}
+      if (!match) {
+        return undefined;
+      }
 
       const startPos = document.positionAt(match.index);
       const endPos = document.positionAt(match.index + match[0].length);
@@ -469,7 +489,9 @@ export class DiagnosticService {
       keyPattern.lastIndex = searchStartIndex;
 
       const match = keyPattern.exec(text);
-      if (!match) {return undefined;}
+      if (!match) {
+        return undefined;
+      }
 
       // If this is the last key part, we found our target
       if (i === keyParts.length - 1) {
@@ -481,7 +503,9 @@ export class DiagnosticService {
 
       // For intermediate keys, find the opening brace and continue searching from there
       let braceIndex = text.indexOf('{', match.index + match[0].length);
-      if (braceIndex === -1) {return undefined;}
+      if (braceIndex === -1) {
+        return undefined;
+      }
 
       searchStartIndex = braceIndex + 1;
     }
@@ -516,5 +540,15 @@ export class DiagnosticService {
       this.fileWatcher.dispose();
     }
     this.diagnosticCollection.dispose();
+  }
+
+  private resolveMessagePath(
+    config: NextIntlConfig,
+    messageConfig: MessageConfig,
+    locale: string
+  ): string {
+    const loadPath = messageConfig.loadPath.replace('${locale}', locale);
+    const basePath = path.dirname(path.dirname(config.requestPath));
+    return path.join(basePath, loadPath);
   }
 }

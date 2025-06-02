@@ -176,6 +176,101 @@ suite('ConfigService Tests', () => {
         loggerStub.log.calledWith('Error parsing next-intl configuration')
       );
     });
+
+    test('should handle createNextIntlPlugin assigned to variable without parameters', async () => {
+      const mockConfig = {
+        get: sinon
+          .stub()
+          .withArgs('detectConfig', true)
+          .returns(true)
+          .withArgs('configPath', '')
+          .returns('')
+          .withArgs('requestPath', '')
+          .returns('')
+      };
+      getConfigurationStub.withArgs('nextIntlHlpr').returns(mockConfig);
+      existsSyncStub.withArgs('/test/workspace/next.config.ts').returns(true);
+      existsSyncStub.withArgs('/test/workspace/i18n/request.ts').returns(true);
+      existsSyncStub.withArgs('/test/workspace/messages').returns(true);
+
+      // This matches the user's exact config pattern
+      readFileSyncStub.withArgs('/test/workspace/next.config.ts', 'utf8')
+        .returns(`import type { NextConfig } from 'next'
+import createNextIntlPlugin from 'next-intl/plugin'
+
+const nextConfig: NextConfig = {
+  /* config options here */
+}
+
+const withNextIntl = createNextIntlPlugin()
+
+export default withNextIntl(nextConfig)`);
+      readFileSyncStub.withArgs('/test/workspace/i18n/request.ts', 'utf8')
+        .returns(`import {getRequestConfig} from 'next-intl/server';
+        
+export default getRequestConfig(async ({requestLocale}) => {
+  const locale = requestLocale || 'en';
+  return {
+    locale,
+    messages: (await import(\`../../messages/\${locale}.json\`)).default
+  };
+});`);
+      readdirSyncStub
+        .withArgs('/test/workspace/messages')
+        .returns(['en.json', 'es.json']);
+
+      const config = await configService.getNextIntlConfig();
+
+      assert(config !== undefined);
+      assert.deepStrictEqual(config.locales, ['en', 'es']);
+      assert.strictEqual(config.defaultLocale, 'en');
+      assert(
+        loggerStub.log.calledWith(
+          'createNextIntlPlugin called without object parameters, will detect locales from messages directory'
+        )
+      );
+    });
+
+    test('should handle createNextIntlPlugin assigned to variable with path parameter', async () => {
+      const mockConfig = {
+        get: sinon
+          .stub()
+          .withArgs('detectConfig', true)
+          .returns(true)
+          .withArgs('configPath', '')
+          .returns('')
+          .withArgs('requestPath', '')
+          .returns('')
+      };
+      getConfigurationStub.withArgs('nextIntlHlpr').returns(mockConfig);
+      existsSyncStub.withArgs('/test/workspace/next.config.ts').returns(true);
+      existsSyncStub.withArgs('/test/workspace/i18n/request.ts').returns(true);
+      existsSyncStub.withArgs('/test/workspace/messages').returns(true);
+
+      readFileSyncStub.withArgs('/test/workspace/next.config.ts', 'utf8')
+        .returns(`import createNextIntlPlugin from 'next-intl/plugin'
+
+const withNextIntl = createNextIntlPlugin('./i18n/request.ts')
+
+export default withNextIntl(nextConfig)`);
+      readFileSyncStub.withArgs('/test/workspace/i18n/request.ts', 'utf8')
+        .returns(`export default getRequestConfig(async ({requestLocale}) => {
+  const locale = requestLocale || 'en';
+  return {
+    locale,
+    messages: (await import(\`../../messages/\${locale}.json\`)).default
+  };
+});`);
+      readdirSyncStub
+        .withArgs('/test/workspace/messages')
+        .returns(['en.json', 'fr.json']);
+
+      const config = await configService.getNextIntlConfig();
+
+      assert(config !== undefined);
+      assert.deepStrictEqual(config.locales, ['en', 'fr']);
+      assert.strictEqual(config.defaultLocale, 'en');
+    });
   });
 
   suite('detectLocales', () => {

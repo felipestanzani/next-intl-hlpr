@@ -29,12 +29,41 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.languages.registerHoverProvider('json', hoverProvider)
   );
 
+  // Set up configuration change handler (always register this)
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration(async (event) => {
+      if (event.affectsConfiguration('nextIntlHlpr')) {
+        configService.clearCache();
+        await translationService.initialize();
+        // Update diagnostics for all open JSON documents
+        const documents = vscode.workspace.textDocuments.filter(
+          (doc) => doc.languageId === 'json'
+        );
+        for (const document of documents) {
+          await diagnosticService.updateDiagnostics(document);
+        }
+      }
+    })
+  );
+
   // Set up file watchers
   const config = await configService.getNextIntlConfig();
   const messageConfig = configService.getMessageConfig();
 
   if (!config || !messageConfig) {
     logger.log('No next-intl configuration found, skipping file watcher setup');
+
+    // Initial diagnostics for open documents even without config
+    const documents = vscode.workspace.textDocuments.filter(
+      (doc) => doc.languageId === 'json'
+    );
+    for (const document of documents) {
+      await diagnosticService.updateDiagnostics(document);
+    }
+
+    context.subscriptions.push(diagnosticService, translationService);
+
+    logger.log('next-intl-hlpr activation completed');
     return;
   }
 
@@ -65,23 +94,6 @@ export async function activate(context: vscode.ExtensionContext) {
   fileWatcher.onDidDelete((uri) => {
     diagnosticService.clearDiagnostics(uri);
   });
-
-  // Set up configuration change handler
-  context.subscriptions.push(
-    vscode.workspace.onDidChangeConfiguration(async (event) => {
-      if (event.affectsConfiguration('nextIntlHlpr')) {
-        configService.clearCache();
-        await translationService.initialize();
-        // Update diagnostics for all open JSON documents
-        const documents = vscode.workspace.textDocuments.filter(
-          (doc) => doc.languageId === 'json'
-        );
-        for (const document of documents) {
-          await diagnosticService.updateDiagnostics(document);
-        }
-      }
-    })
-  );
 
   // Initial diagnostics for open documents
   const documents = vscode.workspace.textDocuments.filter(
