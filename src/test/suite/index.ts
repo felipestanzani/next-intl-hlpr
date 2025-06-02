@@ -5,7 +5,7 @@ import {glob} from 'glob';
 export function run(): Promise<void> {
   // Create the mocha test
   const mocha = new Mocha({
-    ui: 'bdd',
+    ui: 'tdd',
     color: true,
     timeout: 20000
   });
@@ -13,8 +13,17 @@ export function run(): Promise<void> {
   const testsRoot = path.resolve(__dirname, '..');
 
   return new Promise((resolve, reject) => {
-    glob('**/**.test.js', {cwd: testsRoot})
-      .then((files: string[]) => {
+    // Only include extension tests that use suite(), exclude unit tests that use describe()
+    const patterns = ['**/extension.test.js', '**/services/*.test.js'];
+
+    const globPromises = patterns.map((pattern) =>
+      glob(pattern, {cwd: testsRoot})
+    );
+
+    Promise.all(globPromises)
+      .then((results: string[][]) => {
+        const files = results.flat();
+
         // Add files to the test suite
         files.forEach((f: string) => mocha.addFile(path.resolve(testsRoot, f)));
 

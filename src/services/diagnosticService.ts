@@ -106,13 +106,13 @@ export class DiagnosticService {
     document: vscode.TextDocument
   ): Promise<void> {
     const currentLocale = this.getCurrentLocale(document.uri.fsPath);
-    if (!currentLocale) return;
+    if (!currentLocale) {return;}
 
     const allTranslations = this.translationService.getAllTranslations();
     const currentTranslation = allTranslations.find(
       (t) => t.locale === currentLocale
     );
-    if (!currentTranslation) return;
+    if (!currentTranslation) {return;}
 
     const currentContent = JSON.parse(document.getText());
     const currentKeys = this.getAllKeys(currentContent);
@@ -152,7 +152,7 @@ export class DiagnosticService {
     const allTranslations = this.translationService.getAllTranslations();
 
     for (const translation of allTranslations) {
-      if (translation.locale === currentLocale) continue;
+      if (translation.locale === currentLocale) {continue;}
 
       this.checkMissingTranslations(
         translation,
@@ -413,7 +413,7 @@ export class DiagnosticService {
       // Simple key, search for it directly
       const keyPattern = new RegExp(`"${keyParts[0]}"\\s*:`, 'g');
       const match = keyPattern.exec(text);
-      if (!match) return undefined;
+      if (!match) {return undefined;}
 
       const startPos = document.positionAt(match.index);
       const endPos = document.positionAt(match.index + match[0].length);
@@ -447,7 +447,7 @@ export class DiagnosticService {
       const keyPattern = new RegExp(`"${lastKey}"\\s*:`, 'g');
       const match = keyPattern.exec(text);
 
-      if (!match) return undefined;
+      if (!match) {return undefined;}
 
       const startPos = document.positionAt(match.index);
       const endPos = document.positionAt(match.index + match[0].length);
@@ -469,7 +469,7 @@ export class DiagnosticService {
       keyPattern.lastIndex = searchStartIndex;
 
       const match = keyPattern.exec(text);
-      if (!match) return undefined;
+      if (!match) {return undefined;}
 
       // If this is the last key part, we found our target
       if (i === keyParts.length - 1) {
@@ -481,7 +481,7 @@ export class DiagnosticService {
 
       // For intermediate keys, find the opening brace and continue searching from there
       let braceIndex = text.indexOf('{', match.index + match[0].length);
-      if (braceIndex === -1) return undefined;
+      if (braceIndex === -1) {return undefined;}
 
       searchStartIndex = braceIndex + 1;
     }

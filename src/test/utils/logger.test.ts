@@ -9,7 +9,10 @@ describe('Logger Tests', () => {
   let createOutputChannelStub: sinon.SinonStub;
 
   beforeEach(() => {
-    // Import after mocking to ensure the mock is used
+    // Clear the module cache first
+    delete require.cache[require.resolve('../../utils/logger')];
+
+    // Import vscode and create stubs
     vscode = require('vscode');
 
     outputChannelStub = {
@@ -27,8 +30,7 @@ describe('Logger Tests', () => {
       .stub(vscode.window, 'createOutputChannel')
       .returns(outputChannelStub);
 
-    // Clear the module cache and re-import
-    delete require.cache[require.resolve('../../utils/logger')];
+    // Import Logger after setting up the mock
     Logger = require('../../utils/logger').Logger;
 
     logger = new Logger();

@@ -276,6 +276,7 @@ describe('HoverProvider Tests', () => {
         .withArgs(positionStub, /"[^"]+"/)
         .returns(rangeStub);
       documentStub.getText.withArgs(rangeStub).returns(quotedKey);
+      translationServiceStub.findMissingTranslations.withArgs(key).resolves([]);
 
       const result = await hoverProvider.provideHover(
         documentStub,
@@ -297,6 +298,9 @@ describe('HoverProvider Tests', () => {
         .withArgs(positionStub, /"[^"]+"/)
         .returns(rangeStub);
       documentStub.getText.withArgs(rangeStub).returns(malformedKey);
+      translationServiceStub.findMissingTranslations
+        .withArgs('unclose')
+        .resolves([]);
 
       const result = await hoverProvider.provideHover(
         documentStub,
