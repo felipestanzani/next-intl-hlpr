@@ -112,8 +112,7 @@ Module.prototype.require = function (id) {
           textDocuments: []
         },
         languages: {
-          createDiagnosticCollection: mockCreateDiagnosticCollection,
-          registerHoverProvider: () => {}
+          createDiagnosticCollection: mockCreateDiagnosticCollection
         }
       };
     }

@@ -1,18 +1,16 @@
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import * as vscode from 'vscode';
-import * as path from 'path';
 import {activate, deactivate} from '../extension';
 
 suite('Extension Tests', () => {
   let contextStub: sinon.SinonStubbedInstance<vscode.ExtensionContext>;
   let createOutputChannelStub: sinon.SinonStub;
   let getConfigurationStub: sinon.SinonStub;
-  let registerHoverProviderStub: sinon.SinonStub;
   let createFileSystemWatcherStub: sinon.SinonStub;
   let onDidChangeConfigurationStub: sinon.SinonStub;
-  let workspaceFoldersStub: sinon.SinonStub;
   let textDocumentsStub: sinon.SinonStub;
+  let workspaceFoldersStub: sinon.SinonStub;
   let outputChannelStub: any;
   let fileWatcherStub: any;
 
@@ -54,10 +52,6 @@ suite('Extension Tests', () => {
       .stub(vscode.window, 'createOutputChannel')
       .returns(outputChannelStub);
     getConfigurationStub = sinon.stub(vscode.workspace, 'getConfiguration');
-    registerHoverProviderStub = sinon.stub(
-      vscode.languages,
-      'registerHoverProvider'
-    );
     createFileSystemWatcherStub = sinon
       .stub(vscode.workspace, 'createFileSystemWatcher')
       .returns(fileWatcherStub);
@@ -65,18 +59,18 @@ suite('Extension Tests', () => {
       vscode.workspace,
       'onDidChangeConfiguration'
     );
+    textDocumentsStub = sinon
+      .stub(vscode.workspace, 'textDocuments')
+      .get(() => []);
     workspaceFoldersStub = sinon
       .stub(vscode.workspace, 'workspaceFolders')
       .get(() => [
         {
-          uri: {fsPath: '/test/workspace'},
+          uri: vscode.Uri.file('/test/workspace'),
           name: 'test-workspace',
           index: 0
         }
       ]);
-    textDocumentsStub = sinon
-      .stub(vscode.workspace, 'textDocuments')
-      .get(() => []);
   });
 
   teardown(() => {
@@ -164,10 +158,6 @@ suite('Extension Tests', () => {
       // Verify logger creation
       assert(createOutputChannelStub.calledWith('next-intl-hlpr'));
 
-      // Verify hover provider registration
-      assert(registerHoverProviderStub.calledOnce);
-      assert.strictEqual(registerHoverProviderStub.getCall(0).args[0], 'json');
-
       // Verify subscriptions were added
       assert(contextStub.subscriptions.length > 0);
 
@@ -199,8 +189,6 @@ suite('Extension Tests', () => {
 
       await activate(contextStub);
 
-      // Should still register hover provider even without config
-      assert(registerHoverProviderStub.calledOnce);
       assert(outputChannelStub.appendLine.called);
     });
 
@@ -265,7 +253,7 @@ suite('Extension Tests', () => {
       readFileSyncStub
         .withArgs('/test/workspace/i18n/request.ts', 'utf8')
         .returns(
-          'export default getRequestConfig({ messages: (await import(`../messages/${locale}.json`)) });'
+          'export default getRequestConfig(async ({locale}) => { return { messages: (await import(`../messages/${locale}.json`)) }; });'
         );
       readdirSyncStub
         .withArgs('/test/messages')

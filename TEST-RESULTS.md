@@ -72,14 +72,6 @@ Comprehensive unit testing infrastructure has been implemented for the `next-int
   - Nested key support
   - Error handling and disposal
 
-#### HoverProvider Tests (src/test/providers/hoverProvider.test.ts)
-
-- 15+ test cases covering:
-  - Hover functionality for translation keys
-  - Missing translations display
-  - Edge cases (malformed strings, unicode)
-  - Cancellation token handling
-
 #### DiagnosticService Tests (src/test/services/diagnosticService.test.ts)
 
 - 15+ test cases covering:
