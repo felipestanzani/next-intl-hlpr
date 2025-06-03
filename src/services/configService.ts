@@ -189,9 +189,9 @@ export class ConfigService {
       // 2. createNextIntlPlugin()({ ... }) - plugin factory pattern
       // 3. const withNextIntl = createNextIntlPlugin() - assignment to variable (most common)
       // 4. const withNextIntl = createNextIntlPlugin({ ... }) - assignment with config
-      const createNextIntlPluginMatch = content.match(
-        /createNextIntlPlugin\(\s*\)\s*\(\s*(\{[\s\S]*?\})\s*\)|createNextIntlPlugin\(\s*(\{[\s\S]*?\})\s*\)|createNextIntlPlugin\s*\(\s*([^)]*)\s*\)/
-      );
+      const createNextIntlPluginRegex =
+        /createNextIntlPlugin\(\s*\)\s*\(\s*(\{[\s\S]*?\})\s*\)|createNextIntlPlugin\(\s*(\{[\s\S]*?\})\s*\)|createNextIntlPlugin\s*\(\s*([^)]*)\s*\)/;
+      const createNextIntlPluginMatch = createNextIntlPluginRegex.exec(content);
 
       if (!createNextIntlPluginMatch) {
         this.logger.log('No createNextIntlPlugin found in next.config');
@@ -207,11 +207,7 @@ export class ConfigService {
 
       // If createNextIntlPlugin is called without parameters or with non-object parameters,
       // try to find locales in the request.ts file
-      if (
-        !configContent ||
-        !configContent.trim() ||
-        !configContent.includes('{')
-      ) {
+      if (!configContent?.trim() || !configContent?.includes('{')) {
         this.logger.log(
           'createNextIntlPlugin called without object parameters, will detect locales from messages directory'
         );
@@ -224,9 +220,9 @@ export class ConfigService {
         };
       }
 
-      const localesMatch = configContent.match(/locales:\s*\[([\s\S]*?)\]/);
-      const defaultLocaleMatch = configContent.match(
-        /defaultLocale:\s*['"]([^'"]+)['"]/
+      const localesMatch = /locales:\s*\[([\s\S]*?)\]/.exec(configContent);
+      const defaultLocaleMatch = /defaultLocale:\s*['"]([^'"]+)['"]/.exec(
+        configContent
       );
 
       if (!localesMatch || !defaultLocaleMatch) {
@@ -266,12 +262,11 @@ export class ConfigService {
       );
 
       // Try both getMessages and getRequestConfig formats
-      const getMessagesMatch = content.match(
-        /getMessages\([\s\S]*?{([\s\S]*?)}/
+      const getMessagesMatch = /getMessages\([\s\S]*?{([\s\S]*?)}/.exec(
+        content
       );
-      const getRequestConfigMatch = content.match(
-        /getRequestConfig\([\s\S]*?{([\s\S]*?)}/
-      );
+      const getRequestConfigMatch =
+        /getRequestConfig\([\s\S]*?{([\s\S]*?)}/.exec(content);
 
       if (!getMessagesMatch && !getRequestConfigMatch) {
         this.logger.log(
@@ -284,9 +279,8 @@ export class ConfigService {
       if (getRequestConfigMatch) {
         this.logger.log('Found getRequestConfig format');
         // Look for the dynamic import pattern in the return statement
-        const messagesImportMatch = content.match(
-          /messages:\s*\(\s*await\s*import\(`([^`]+)`\)\)/
-        );
+        const messagesImportMatch =
+          /messages:\s*\(\s*await\s*import\(`([^`]+)`\)\)/.exec(content);
         if (messagesImportMatch) {
           const messagesPath = messagesImportMatch[1].replace(
             /\.\.\/\.\.\//,
@@ -308,16 +302,16 @@ export class ConfigService {
       const configContent = getMessagesMatch?.[1];
       this.logger.log(`Found getMessages config: ${configContent}`);
 
-      const namespacesMatch = configContent?.match(
-        /namespaces:\s*\[([\s\S]*?)\]/
-      );
-      const defaultNamespaceMatch = configContent?.match(
-        /defaultNamespace:\s*['"]([^'"]+)['"]/
-      );
-      const loadPathMatch = configContent?.match(
-        /loadPath:\s*['"]([^'"]+)['"]/
-      );
-      const dynamicImportMatch = content.match(/dynamicImport:\s*(true|false)/);
+      const namespacesMatch = configContent
+        ? /namespaces:\s*\[([\s\S]*?)\]/.exec(configContent)
+        : null;
+      const defaultNamespaceMatch = configContent
+        ? /defaultNamespace:\s*['"]([^'"]+)['"]/.exec(configContent)
+        : null;
+      const loadPathMatch = configContent
+        ? /loadPath:\s*['"]([^'"]+)['"]/.exec(configContent)
+        : null;
+      const dynamicImportMatch = /dynamicImport:\s*(true|false)/.exec(content);
 
       if (!namespacesMatch || !defaultNamespaceMatch || !loadPathMatch) {
         this.logger.log('Missing required configuration in getMessages');
@@ -346,89 +340,5 @@ export class ConfigService {
   clearCache(): void {
     this.configCache = undefined;
     this.messageConfigCache = undefined;
-  }
-
-  getTranslationsFolder(): string {
-    const config = vscode.workspace.getConfiguration('nextIntlHlpr');
-    const folder = config.get('translationsFolder', 'messages');
-    this.logger.log(`Translations folder configured: ${folder}`);
-    return folder;
-  }
-
-  getTranslationsMode(): string {
-    const config = vscode.workspace.getConfiguration('nextIntlHlpr');
-    const mode = config.get('translationsMode', 'auto');
-    this.logger.log(`Translations mode configured: ${mode}`);
-    return mode;
-  }
-
-  findTranslationsFolder(): string | undefined {
-    const workspaceFolders = vscode.workspace.workspaceFolders;
-    if (!workspaceFolders) {
-      this.logger.log(
-        'No workspace folders found',
-        new Error('Workspace not open')
-      );
-      return undefined;
-    }
-
-    const translationsFolder = this.getTranslationsFolder();
-    for (const folder of workspaceFolders) {
-      const translationsPath = path.join(folder.uri.fsPath, translationsFolder);
-      try {
-        if (
-          fs.existsSync(translationsPath) &&
-          fs.lstatSync(translationsPath).isDirectory()
-        ) {
-          this.logger.log(`Translations folder found: ${translationsPath}`);
-          return translationsPath;
-        }
-      } catch (error) {
-        this.logger.log(
-          `Error checking translations folder ${translationsPath}`,
-          error
-        );
-      }
-    }
-    this.logger.log('No translations folder found in workspace');
-    return undefined;
-  }
-
-  isSingleFileMode(translationsPath: string): boolean {
-    const mode = this.getTranslationsMode();
-    if (mode === 'single-file') {
-      this.logger.log('Single-file mode enforced');
-      return true;
-    } else if (mode === 'folder') {
-      this.logger.log('Folder mode enforced');
-      return false;
-    }
-
-    try {
-      const contents = fs.readdirSync(translationsPath);
-      const hasSubfolders = contents.some((item) => {
-        const itemPath = path.join(translationsPath, item);
-        return fs.lstatSync(itemPath).isDirectory();
-      });
-      if (hasSubfolders) {
-        this.logger.log('Auto mode: detected subfolders, using folder mode');
-        return false; // Prioritize folder mode
-      }
-      const hasJson = contents.some((item) => item.endsWith('.json'));
-      this.logger.log(
-        `Auto mode: ${
-          hasJson
-            ? 'detected JSON files, using single-file mode'
-            : 'no JSON files, defaulting to single-file mode'
-        }`
-      );
-      return hasJson;
-    } catch (error) {
-      this.logger.log(
-        `Error reading translations folder ${translationsPath}`,
-        error
-      );
-      return true; // Fallback to single-file mode
-    }
   }
 }

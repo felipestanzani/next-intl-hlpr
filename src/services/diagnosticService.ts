@@ -461,6 +461,10 @@ export class DiagnosticService {
       return this.findNestedKeyInText(document, text, keyParts);
     } catch (error) {
       // Fallback to simple search if JSON parsing fails
+      this.logger.log(
+        'JSON parsing failed in findKeyRange, using fallback search',
+        error
+      );
       const lastKey = keyParts[keyParts.length - 1];
       const keyPattern = new RegExp(`"${lastKey}"\\s*:`, 'g');
       const match = keyPattern.exec(text);

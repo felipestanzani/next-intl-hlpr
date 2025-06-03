@@ -2,7 +2,6 @@ import * as assert from 'assert';
 import * as sinon from 'sinon';
 import * as vscode from 'vscode';
 import * as fs from 'fs';
-import * as path from 'path';
 import {ConfigService} from '../../services/configService';
 import {Logger} from '../../utils/logger';
 
