@@ -202,13 +202,26 @@ export class DiagnosticService {
     missingTranslationsByKey: Map<string, Set<string>>
   ) {
     // Only check for missing translations in the current file's keys
-    for (const [key] of currentTranslation.messages) {
+    for (const [key, value] of currentTranslation.messages) {
       if (!translation.messages.has(key)) {
-        this.addMissingTranslation(
-          key,
-          translation.locale,
-          missingTranslationsByKey
-        );
+        // Check if this is a parent key (marked with '[object]') or leaf key (has translation value)
+        const isParentKey = value === '[object]';
+
+        if (isParentKey) {
+          // For parent keys, use the parent key message
+          this.addMissingParentKey(
+            key,
+            translation.locale,
+            missingTranslationsByKey
+          );
+        } else {
+          // For leaf keys, use the translation message
+          this.addMissingTranslation(
+            key,
+            translation.locale,
+            missingTranslationsByKey
+          );
+        }
       }
     }
   }
@@ -222,6 +235,19 @@ export class DiagnosticService {
       missingTranslationsByKey.set(key, new Set());
     }
     missingTranslationsByKey.get(key)!.add(locale);
+  }
+
+  private addMissingParentKey(
+    key: string,
+    locale: string,
+    missingTranslationsByKey: Map<string, Set<string>>
+  ) {
+    // We'll use a special prefix to mark parent keys
+    const parentKeyMarker = `__PARENT__${key}`;
+    if (!missingTranslationsByKey.has(parentKeyMarker)) {
+      missingTranslationsByKey.set(parentKeyMarker, new Set());
+    }
+    missingTranslationsByKey.get(parentKeyMarker)!.add(locale);
   }
 
   private async checkMissingNestedKeys(
@@ -357,13 +383,27 @@ export class DiagnosticService {
     diagnostics: vscode.Diagnostic[]
   ): void {
     for (const [key, missingLocales] of missingTranslationsByKey) {
-      const range = this.findKeyRange(document, key);
-      if (range) {
-        const message = this.createMissingTranslationMessage(
-          key,
-          missingLocales
-        );
-        diagnostics.push(this.createDiagnostic(range, message));
+      // Check if this is a parent key (marked with __PARENT__ prefix)
+      if (key.startsWith('__PARENT__')) {
+        const actualKey = key.replace('__PARENT__', '');
+        const range = this.findKeyRange(document, actualKey);
+        if (range) {
+          const message = this.createMissingParentKeyMessage(
+            actualKey,
+            missingLocales
+          );
+          diagnostics.push(this.createDiagnostic(range, message));
+        }
+      } else {
+        // Regular translation key
+        const range = this.findKeyRange(document, key);
+        if (range) {
+          const message = this.createMissingTranslationMessage(
+            key,
+            missingLocales
+          );
+          diagnostics.push(this.createDiagnostic(range, message));
+        }
       }
     }
   }
@@ -561,6 +601,13 @@ export class DiagnosticService {
     missingLocales: Set<string>
   ): string {
     return `Missing translations for key "${key}" in:\n${Array.from(missingLocales).join(', ')}`;
+  }
+
+  private createMissingParentKeyMessage(
+    key: string,
+    missingLocales: Set<string>
+  ): string {
+    return `Missing key "${key}" in:\n${Array.from(missingLocales).join(', ')}`;
   }
 
   private createMissingNestedKeysMessage(
