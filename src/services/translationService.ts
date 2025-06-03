@@ -103,6 +103,8 @@ export class TranslationService implements ITranslationService {
     for (const [key, value] of Object.entries(messages)) {
       const fullKey = prefix ? `${prefix}.${key}` : key;
       if (typeof value === 'object' && value !== null) {
+        // Add the parent key as well to support parent key lookups
+        translation.messages.set(fullKey, '[object]');
         this.addMessagesToTranslation(translation, value, fullKey);
       } else {
         translation.messages.set(fullKey, String(value));
@@ -162,6 +164,7 @@ export class TranslationService implements ITranslationService {
 
     const currentLocale = this.getCurrentLocale(key);
     if (!currentLocale) {
+      this.logger.log(`Key "${key}" not found in any locale`);
       return missingLocales;
     }
 
@@ -199,9 +202,21 @@ export class TranslationService implements ITranslationService {
       }
 
       const translation = this.translations.get(locale);
-      if (!translation?.messages.has(key)) {
-        this.logger.log(`Key "${key}" is missing in locale "${locale}"`);
-        missingLocales.push(locale);
+      if (!translation) {
+        continue;
+      }
+
+      // Check for exact key match
+      if (!translation.messages.has(key)) {
+        // If no exact match, check if it's a parent key
+        const hasChildKeys = Array.from(translation.messages.keys()).some((k) =>
+          k.startsWith(`${key}.`)
+        );
+
+        if (!hasChildKeys) {
+          this.logger.log(`Key "${key}" is missing in locale "${locale}"`);
+          missingLocales.push(locale);
+        }
       }
     }
   }
@@ -259,11 +274,23 @@ export class TranslationService implements ITranslationService {
   private getCurrentLocale(key: string): string | undefined {
     // Try to find the locale by checking which translation file contains this key
     for (const [locale, translation] of this.translations.entries()) {
+      // Check for exact key match
       if (translation.messages.has(key)) {
         this.logger.log(`Found key "${key}" in locale "${locale}"`);
         return locale;
       }
+
+      // Check if it's a parent key (has child keys starting with key.)
+      const hasChildKeys = Array.from(translation.messages.keys()).some((k) =>
+        k.startsWith(`${key}.`)
+      );
+
+      if (hasChildKeys) {
+        this.logger.log(`Found parent key "${key}" in locale "${locale}"`);
+        return locale;
+      }
     }
+
     this.logger.log(`Key "${key}" not found in any locale`);
     return undefined;
   }

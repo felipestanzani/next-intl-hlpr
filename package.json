@@ -3,7 +3,7 @@
   "displayName": "next-intl-hlpr",
   "publisher": "felipestanzani",
   "description": "Highlights missing translations in next-intl JSON files and shows missing languages on hover",
-  "version": "0.0.4",
+  "version": "0.0.5-beta.1",
   "icon": "images/icon.png",
   "repository": {
     "type": "git",

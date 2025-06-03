@@ -3,7 +3,6 @@ import {Logger} from './utils/logger';
 import {ConfigService} from './services/configService';
 import {TranslationService} from './services/translationService';
 import {DiagnosticService} from './services/diagnosticService';
-import {HoverProvider} from './providers/hoverProvider';
 import * as path from 'path';
 
 // Activate the extension
@@ -22,12 +21,6 @@ export async function activate(context: vscode.ExtensionContext) {
   // Initialize services
   await translationService.initialize();
   await diagnosticService.setupFileWatcher();
-
-  // Register hover provider
-  const hoverProvider = new HoverProvider(translationService);
-  context.subscriptions.push(
-    vscode.languages.registerHoverProvider('json', hoverProvider)
-  );
 
   // Set up configuration change handler (always register this)
   context.subscriptions.push(
