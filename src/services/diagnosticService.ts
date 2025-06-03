@@ -124,18 +124,22 @@ export class DiagnosticService {
     const currentContent = JSON.parse(document.getText());
     const currentKeys = this.getAllKeys(currentContent);
 
-    const {missingNestedKeysByParent, missingTranslationsByKey} =
-      await this.analyzeMissingTranslations(
-        currentLocale,
-        currentTranslation,
-        currentKeys,
-        document
-      );
+    const {
+      missingNestedKeysByParent,
+      missingTranslationsByKey,
+      missingParentKeys
+    } = await this.analyzeMissingTranslations(
+      currentLocale,
+      currentTranslation,
+      currentKeys,
+      document
+    );
 
     const diagnostics = this.createDiagnostics(
       document,
       missingNestedKeysByParent,
       missingTranslationsByKey,
+      missingParentKeys,
       currentKeys
     );
 
@@ -156,6 +160,7 @@ export class DiagnosticService {
       Map<string, Set<string>>
     >();
     const missingTranslationsByKey = new Map<string, Set<string>>();
+    const missingParentKeys = new Map<string, Set<string>>();
     const allTranslations = this.translationService.getAllTranslations();
 
     for (const translation of allTranslations) {
@@ -175,9 +180,20 @@ export class DiagnosticService {
         document,
         missingNestedKeysByParent
       );
+
+      await this.checkMissingParentKeys(
+        translation,
+        currentKeys,
+        document,
+        missingParentKeys
+      );
     }
 
-    return {missingNestedKeysByParent, missingTranslationsByKey};
+    return {
+      missingNestedKeysByParent,
+      missingTranslationsByKey,
+      missingParentKeys
+    };
   }
 
   private checkMissingTranslations(
@@ -289,6 +305,7 @@ export class DiagnosticService {
     document: vscode.TextDocument,
     missingNestedKeysByParent: Map<string, Map<string, Set<string>>>,
     missingTranslationsByKey: Map<string, Set<string>>,
+    missingParentKeys: Map<string, Set<string>>,
     currentKeys: string[]
   ): vscode.Diagnostic[] {
     const diagnostics: vscode.Diagnostic[] = [];
@@ -306,6 +323,11 @@ export class DiagnosticService {
     this.addMissingParentTranslationsDiagnostics(
       document,
       currentKeys,
+      diagnostics
+    );
+    this.addMissingParentKeysDiagnostics(
+      document,
+      missingParentKeys,
       diagnostics
     );
 
@@ -368,6 +390,23 @@ export class DiagnosticService {
           }
         }
       }
+    }
+  }
+
+  private addMissingParentKeysDiagnostics(
+    document: vscode.TextDocument,
+    missingParentKeys: Map<string, Set<string>>,
+    diagnostics: vscode.Diagnostic[]
+  ): void {
+    if (missingParentKeys.size === 0) {
+      return;
+    }
+
+    // Find the opening brace of the JSON file
+    const range = this.findOpeningBraceRange(document);
+    if (range) {
+      const message = this.createMissingParentKeysMessage(missingParentKeys);
+      diagnostics.push(this.createDiagnostic(range, message));
     }
   }
 
@@ -535,6 +574,30 @@ export class DiagnosticService {
     return lines.join('\n');
   }
 
+  private createMissingParentKeysMessage(
+    missingParentKeys: Map<string, Set<string>>
+  ): string {
+    const lines = ['Missing keys in this file:'];
+    for (const [parentKey, locales] of missingParentKeys) {
+      const localeList = Array.from(locales).join(', ');
+      lines.push(`- "${parentKey}" present in: ${localeList}`);
+    }
+    return lines.join('\n');
+  }
+
+  private findOpeningBraceRange(
+    document: vscode.TextDocument
+  ): vscode.Range | undefined {
+    const text = document.getText();
+    const openingBraceIndex = text.indexOf('{');
+    if (openingBraceIndex === -1) {
+      return undefined;
+    }
+
+    const position = document.positionAt(openingBraceIndex);
+    return new vscode.Range(position, position.translate(0, 1));
+  }
+
   clearDiagnostics(uri: vscode.Uri): void {
     this.diagnosticCollection.delete(uri);
   }
@@ -554,5 +617,58 @@ export class DiagnosticService {
     const loadPath = messageConfig.loadPath.replace('${locale}', locale);
     const basePath = path.dirname(path.dirname(config.requestPath));
     return path.join(basePath, loadPath);
+  }
+
+  private async checkMissingParentKeys(
+    translation: any,
+    currentKeys: string[],
+    document: vscode.TextDocument,
+    missingParentKeys: Map<string, Set<string>>
+  ) {
+    const config = await this.configService.getNextIntlConfig();
+    const messageConfig = this.configService.getMessageConfig();
+    if (!config || !messageConfig) {
+      return;
+    }
+
+    const otherFilePath = this.resolveMessagePath(
+      config,
+      messageConfig,
+      translation.locale
+    );
+    const otherContent = JSON.parse(
+      Buffer.from(
+        await vscode.workspace.fs.readFile(vscode.Uri.file(otherFilePath))
+      ).toString()
+    );
+    const otherKeys = this.getAllKeys(otherContent);
+
+    // Get parent keys from both files
+    const currentParentKeys = this.getParentKeys(currentKeys);
+    const otherParentKeys = this.getParentKeys(otherKeys);
+
+    // Find parent keys that exist in other file but not in current file
+    for (const parentKey of otherParentKeys) {
+      if (!currentParentKeys.includes(parentKey)) {
+        if (!missingParentKeys.has(parentKey)) {
+          missingParentKeys.set(parentKey, new Set());
+        }
+        missingParentKeys.get(parentKey)!.add(translation.locale);
+      }
+    }
+  }
+
+  private getParentKeys(keys: string[]): string[] {
+    const parentKeys = new Set<string>();
+    for (const key of keys) {
+      const keyParts = key.split('.');
+      if (keyParts.length > 1) {
+        parentKeys.add(keyParts[0]);
+      } else {
+        // Top-level keys are also parent keys
+        parentKeys.add(key);
+      }
+    }
+    return Array.from(parentKeys);
   }
 }

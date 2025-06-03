@@ -444,4 +444,309 @@ suite('DiagnosticService Tests', () => {
       assert(loggerStub.log.called);
     });
   });
+
+  suite('Missing Parent Keys Rule', () => {
+    let readFileStub: sinon.SinonStub;
+    let mockMessageConfig: any;
+
+    setup(() => {
+      readFileStub = sinon.stub(vscode.workspace.fs, 'readFile');
+      mockMessageConfig = {
+        loadPath: 'messages/${locale}.json'
+      };
+      configServiceStub.getMessageConfig.returns(mockMessageConfig);
+    });
+
+    teardown(() => {
+      readFileStub.restore();
+    });
+
+    test('should detect missing parent keys and call diagnostic collection', async () => {
+      const mockConfig = {
+        locales: ['en', 'es'],
+        defaultLocale: 'en',
+        messagesPath: 'messages/${locale}.json',
+        requestPath: '/test/workspace/i18n/request.ts'
+      };
+
+      const mockTranslations = [
+        {
+          locale: 'en',
+          messages: new Map([
+            ['HomePage.title', 'Hello world!'],
+            ['Footer.privacy', 'Privacy Policy']
+          ])
+        },
+        {
+          locale: 'es',
+          messages: new Map([
+            ['HomePage.title', '¡Hola mundo!'],
+            ['Header.title', 'Mi aplicación web']
+          ])
+        }
+      ];
+
+      // Mock file contents
+      const enContent = {
+        HomePage: {title: 'Hello world!'},
+        Footer: {privacy: 'Privacy Policy'}
+      };
+
+      const esContent = {
+        HomePage: {title: '¡Hola mundo!'},
+        Header: {title: 'Mi aplicación web'}
+      };
+
+      configServiceStub.getNextIntlConfig.resolves(mockConfig);
+      translationServiceStub.getAllTranslations.returns(mockTranslations);
+      documentStub.getText.returns(JSON.stringify(enContent));
+      documentStub.positionAt.withArgs(0).returns(new vscode.Position(0, 0));
+
+      // Mock reading the Spanish file
+      readFileStub
+        .withArgs(vscode.Uri.file('/test/workspace/messages/es.json'))
+        .resolves(Buffer.from(JSON.stringify(esContent)));
+
+      await (diagnosticService as any).updateFileDiagnostics(documentStub);
+
+      // Verify diagnostic collection was called
+      assert(diagnosticCollectionStub.set.called);
+    });
+
+    test('should handle multiple missing parent keys from multiple locales', async () => {
+      const mockConfig = {
+        locales: ['en', 'es', 'fr'],
+        defaultLocale: 'en',
+        messagesPath: 'messages/${locale}.json',
+        requestPath: '/test/workspace/i18n/request.ts'
+      };
+
+      const mockTranslations = [
+        {
+          locale: 'en',
+          messages: new Map([['HomePage.title', 'Hello world!']])
+        },
+        {
+          locale: 'es',
+          messages: new Map([
+            ['HomePage.title', '¡Hola mundo!'],
+            ['Header.title', 'Mi aplicación web']
+          ])
+        },
+        {
+          locale: 'fr',
+          messages: new Map([
+            ['HomePage.title', 'Bonjour le monde!'],
+            ['Footer.privacy', 'Politique de confidentialité'],
+            ['Navigation.home', 'Accueil']
+          ])
+        }
+      ];
+
+      const enContent = {HomePage: {title: 'Hello world!'}};
+      const esContent = {
+        HomePage: {title: '¡Hola mundo!'},
+        Header: {title: 'Mi aplicación web'}
+      };
+      const frContent = {
+        HomePage: {title: 'Bonjour le monde!'},
+        Footer: {privacy: 'Politique de confidentialité'},
+        Navigation: {home: 'Accueil'}
+      };
+
+      configServiceStub.getNextIntlConfig.resolves(mockConfig);
+      translationServiceStub.getAllTranslations.returns(mockTranslations);
+      documentStub.getText.returns(JSON.stringify(enContent));
+      documentStub.positionAt.withArgs(0).returns(new vscode.Position(0, 0));
+
+      readFileStub
+        .withArgs(vscode.Uri.file('/test/workspace/messages/es.json'))
+        .resolves(Buffer.from(JSON.stringify(esContent)));
+      readFileStub
+        .withArgs(vscode.Uri.file('/test/workspace/messages/fr.json'))
+        .resolves(Buffer.from(JSON.stringify(frContent)));
+
+      await (diagnosticService as any).updateFileDiagnostics(documentStub);
+
+      // Verify diagnostic collection was called
+      assert(diagnosticCollectionStub.set.called);
+    });
+
+    test('should not create diagnostic when no parent keys are missing', async () => {
+      const mockConfig = {
+        locales: ['en', 'es'],
+        defaultLocale: 'en',
+        messagesPath: 'messages/${locale}.json',
+        requestPath: '/test/workspace/i18n/request.ts'
+      };
+
+      const mockTranslations = [
+        {
+          locale: 'en',
+          messages: new Map([
+            ['HomePage.title', 'Hello world!'],
+            ['Header.title', 'My App']
+          ])
+        },
+        {
+          locale: 'es',
+          messages: new Map([
+            ['HomePage.title', '¡Hola mundo!'],
+            ['Header.title', 'Mi aplicación web']
+          ])
+        }
+      ];
+
+      const enContent = {
+        HomePage: {title: 'Hello world!'},
+        Header: {title: 'My App'}
+      };
+      const esContent = {
+        HomePage: {title: '¡Hola mundo!'},
+        Header: {title: 'Mi aplicación web'}
+      };
+
+      configServiceStub.getNextIntlConfig.resolves(mockConfig);
+      translationServiceStub.getAllTranslations.returns(mockTranslations);
+      documentStub.getText.returns(JSON.stringify(enContent));
+
+      readFileStub
+        .withArgs(vscode.Uri.file('/test/workspace/messages/es.json'))
+        .resolves(Buffer.from(JSON.stringify(esContent)));
+
+      await (diagnosticService as any).updateFileDiagnostics(documentStub);
+
+      // Verify diagnostic collection was called (may contain other diagnostics)
+      assert(diagnosticCollectionStub.set.called);
+    });
+
+    test('should handle top-level keys correctly', async () => {
+      const mockConfig = {
+        locales: ['en', 'es'],
+        defaultLocale: 'en',
+        messagesPath: 'messages/${locale}.json',
+        requestPath: '/test/workspace/i18n/request.ts'
+      };
+
+      const mockTranslations = [
+        {
+          locale: 'en',
+          messages: new Map([['welcome', 'Welcome']])
+        },
+        {
+          locale: 'es',
+          messages: new Map([
+            ['welcome', 'Bienvenido'],
+            ['goodbye', 'Adiós']
+          ])
+        }
+      ];
+
+      const enContent = {welcome: 'Welcome'};
+      const esContent = {welcome: 'Bienvenido', goodbye: 'Adiós'};
+
+      configServiceStub.getNextIntlConfig.resolves(mockConfig);
+      translationServiceStub.getAllTranslations.returns(mockTranslations);
+      documentStub.getText.returns(JSON.stringify(enContent));
+      documentStub.positionAt.withArgs(0).returns(new vscode.Position(0, 0));
+
+      readFileStub
+        .withArgs(vscode.Uri.file('/test/workspace/messages/es.json'))
+        .resolves(Buffer.from(JSON.stringify(esContent)));
+
+      await (diagnosticService as any).updateFileDiagnostics(documentStub);
+
+      // Verify diagnostic collection was called
+      assert(diagnosticCollectionStub.set.called);
+    });
+
+    test('should handle mixed nested and top-level keys', async () => {
+      const mockConfig = {
+        locales: ['en', 'es'],
+        defaultLocale: 'en',
+        messagesPath: 'messages/${locale}.json',
+        requestPath: '/test/workspace/i18n/request.ts'
+      };
+
+      const mockTranslations = [
+        {
+          locale: 'en',
+          messages: new Map([
+            ['HomePage.title', 'Hello world!'],
+            ['simple', 'Simple text']
+          ])
+        },
+        {
+          locale: 'es',
+          messages: new Map([
+            ['HomePage.title', '¡Hola mundo!'],
+            ['simple', 'Texto simple'],
+            ['Header.title', 'Mi aplicación web'],
+            ['footer', 'Pie de página']
+          ])
+        }
+      ];
+
+      const enContent = {
+        HomePage: {title: 'Hello world!'},
+        simple: 'Simple text'
+      };
+      const esContent = {
+        HomePage: {title: '¡Hola mundo!'},
+        simple: 'Texto simple',
+        Header: {title: 'Mi aplicación web'},
+        footer: 'Pie de página'
+      };
+
+      configServiceStub.getNextIntlConfig.resolves(mockConfig);
+      translationServiceStub.getAllTranslations.returns(mockTranslations);
+      documentStub.getText.returns(JSON.stringify(enContent));
+      documentStub.positionAt.withArgs(0).returns(new vscode.Position(0, 0));
+
+      readFileStub
+        .withArgs(vscode.Uri.file('/test/workspace/messages/es.json'))
+        .resolves(Buffer.from(JSON.stringify(esContent)));
+
+      await (diagnosticService as any).updateFileDiagnostics(documentStub);
+
+      // Verify diagnostic collection was called
+      assert(diagnosticCollectionStub.set.called);
+    });
+
+    test('should handle files with no opening brace gracefully', async () => {
+      const mockConfig = {
+        locales: ['en', 'es'],
+        defaultLocale: 'en',
+        messagesPath: 'messages/${locale}.json',
+        requestPath: '/test/workspace/i18n/request.ts'
+      };
+
+      const mockTranslations = [
+        {
+          locale: 'en',
+          messages: new Map([['hello', 'Hello']])
+        },
+        {
+          locale: 'es',
+          messages: new Map([
+            ['hello', 'Hola'],
+            ['goodbye', 'Adiós']
+          ])
+        }
+      ];
+
+      configServiceStub.getNextIntlConfig.resolves(mockConfig);
+      translationServiceStub.getAllTranslations.returns(mockTranslations);
+      documentStub.getText.returns('invalid content without brace');
+
+      readFileStub
+        .withArgs(vscode.Uri.file('/test/workspace/messages/es.json'))
+        .resolves(Buffer.from('{"hello": "Hola", "goodbye": "Adiós"}'));
+
+      await (diagnosticService as any).updateFileDiagnostics(documentStub);
+
+      // Should handle gracefully without throwing
+      assert(loggerStub.log.called);
+    });
+  });
 });

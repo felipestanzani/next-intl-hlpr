@@ -62,7 +62,7 @@ suite('Extension Tests', () => {
     textDocumentsStub = sinon
       .stub(vscode.workspace, 'textDocuments')
       .get(() => []);
-    workspaceFoldersStub = sinon
+    workspaceFoldersStub = sinon // NOSONAR
       .stub(vscode.workspace, 'workspaceFolders')
       .get(() => [
         {
