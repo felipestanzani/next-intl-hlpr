@@ -749,4 +749,207 @@ suite('DiagnosticService Tests', () => {
       assert(loggerStub.log.called);
     });
   });
+
+  suite('Warning Messages', () => {
+    let readFileStub: sinon.SinonStub;
+    let mockMessageConfig: any;
+
+    setup(() => {
+      readFileStub = sinon.stub(vscode.workspace.fs, 'readFile');
+      mockMessageConfig = {
+        loadPath: 'messages/${locale}.json'
+      };
+      configServiceStub.getMessageConfig.returns(mockMessageConfig);
+    });
+
+    teardown(() => {
+      readFileStub.restore();
+    });
+
+    test('should show "Missing translations for key" warning', async () => {
+      const mockConfig = {
+        locales: ['en', 'es'],
+        defaultLocale: 'en',
+        messagesPath: 'messages/${locale}.json',
+        requestPath: '/test/workspace/i18n/request.ts'
+      };
+
+      const mockTranslations = [
+        {
+          locale: 'en',
+          messages: new Map([
+            ['welcome', 'Welcome'],
+            ['missing_key', 'This key is missing in ES']
+          ])
+        },
+        {
+          locale: 'es',
+          messages: new Map([['welcome', 'Bienvenido']])
+        }
+      ];
+
+      const enContent = {
+        welcome: 'Welcome',
+        missing_key: 'This key is missing in ES'
+      };
+      const esContent = {
+        welcome: 'Bienvenido'
+      };
+
+      configServiceStub.getNextIntlConfig.resolves(mockConfig);
+      translationServiceStub.getAllTranslations.returns(mockTranslations);
+      documentStub.getText.returns(JSON.stringify(enContent));
+      documentStub.positionAt.withArgs(0).returns(new vscode.Position(0, 0));
+
+      readFileStub
+        .withArgs(vscode.Uri.file('/test/workspace/messages/es.json'))
+        .resolves(Buffer.from(JSON.stringify(esContent)));
+
+      await (diagnosticService as any).updateFileDiagnostics(documentStub);
+
+      const setCall = diagnosticCollectionStub.set.getCall(0);
+      const entries = setCall.args[0] as readonly [
+        vscode.Uri,
+        readonly vscode.Diagnostic[] | undefined
+      ][];
+      const diagnostics = entries[0][1] as vscode.Diagnostic[];
+      const missingTranslationWarning = diagnostics.find(
+        (d: vscode.Diagnostic) =>
+          d.message.includes('Missing translations for key')
+      );
+
+      assert(missingTranslationWarning);
+      assert(missingTranslationWarning.message.includes('missing_key'));
+      assert(missingTranslationWarning.message.includes('es'));
+    });
+
+    test('should show "Missing key" warning', async () => {
+      const mockConfig = {
+        locales: ['en', 'es'],
+        defaultLocale: 'en',
+        messagesPath: 'messages/${locale}.json',
+        requestPath: '/test/workspace/i18n/request.ts'
+      };
+
+      const mockTranslations = [
+        {
+          locale: 'en',
+          messages: new Map([['welcome', 'Welcome']])
+        },
+        {
+          locale: 'es',
+          messages: new Map([
+            ['welcome', 'Bienvenido'],
+            ['extra_key', 'This key is missing in EN']
+          ])
+        }
+      ];
+
+      const enContent = {
+        welcome: 'Welcome'
+      };
+      const esContent = {
+        welcome: 'Bienvenido',
+        extra_key: 'This key is missing in EN'
+      };
+
+      configServiceStub.getNextIntlConfig.resolves(mockConfig);
+      translationServiceStub.getAllTranslations.returns(mockTranslations);
+      documentStub.getText.returns(JSON.stringify(enContent));
+      documentStub.positionAt.withArgs(0).returns(new vscode.Position(0, 0));
+
+      readFileStub
+        .withArgs(vscode.Uri.file('/test/workspace/messages/es.json'))
+        .resolves(Buffer.from(JSON.stringify(esContent)));
+
+      await (diagnosticService as any).updateFileDiagnostics(documentStub);
+
+      const setCall = diagnosticCollectionStub.set.getCall(0);
+      const entries = setCall.args[0] as readonly [
+        vscode.Uri,
+        readonly vscode.Diagnostic[] | undefined
+      ][];
+      const diagnostics = entries[0][1] as vscode.Diagnostic[];
+      const missingKeyWarning = diagnostics.find((d: vscode.Diagnostic) =>
+        d.message.includes('Missing key')
+      );
+
+      assert(missingKeyWarning);
+      assert(missingKeyWarning.message.includes('extra_key'));
+    });
+
+    test('should show "Missing translations in" warning', async () => {
+      const mockConfig = {
+        locales: ['en', 'es', 'fr'],
+        defaultLocale: 'en',
+        messagesPath: 'messages/${locale}.json',
+        requestPath: '/test/workspace/i18n/request.ts'
+      };
+
+      const mockTranslations = [
+        {
+          locale: 'en',
+          messages: new Map([
+            ['HomePage.title', 'Hello world!'],
+            ['HomePage.subtitle', 'Welcome']
+          ])
+        },
+        {
+          locale: 'es',
+          messages: new Map([['HomePage.title', '¡Hola mundo!']])
+        },
+        {
+          locale: 'fr',
+          messages: new Map([['HomePage.title', 'Bonjour le monde!']])
+        }
+      ];
+
+      const enContent = {
+        HomePage: {
+          title: 'Hello world!',
+          subtitle: 'Welcome'
+        }
+      };
+      const esContent = {
+        HomePage: {
+          title: '¡Hola mundo!'
+        }
+      };
+      const frContent = {
+        HomePage: {
+          title: 'Bonjour le monde!'
+        }
+      };
+
+      configServiceStub.getNextIntlConfig.resolves(mockConfig);
+      translationServiceStub.getAllTranslations.returns(mockTranslations);
+      documentStub.getText.returns(JSON.stringify(enContent));
+      documentStub.positionAt.withArgs(0).returns(new vscode.Position(0, 0));
+
+      readFileStub
+        .withArgs(vscode.Uri.file('/test/workspace/messages/es.json'))
+        .resolves(Buffer.from(JSON.stringify(esContent)));
+      readFileStub
+        .withArgs(vscode.Uri.file('/test/workspace/messages/fr.json'))
+        .resolves(Buffer.from(JSON.stringify(frContent)));
+
+      await (diagnosticService as any).updateFileDiagnostics(documentStub);
+
+      const setCall = diagnosticCollectionStub.set.getCall(0);
+      const entries = setCall.args[0] as readonly [
+        vscode.Uri,
+        readonly vscode.Diagnostic[] | undefined
+      ][];
+      const diagnostics = entries[0][1] as vscode.Diagnostic[];
+      const missingTranslationsWarning = diagnostics.find(
+        (d: vscode.Diagnostic) => d.message.includes('Missing translations in')
+      );
+
+      assert(missingTranslationsWarning);
+      assert(missingTranslationsWarning.message.includes('HomePage'));
+      assert(missingTranslationsWarning.message.includes('subtitle'));
+      assert(missingTranslationsWarning.message.includes('es'));
+      assert(missingTranslationsWarning.message.includes('fr'));
+    });
+  });
 });
