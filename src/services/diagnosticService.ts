@@ -4,6 +4,11 @@ import {Logger} from '../utils/logger';
 import {TranslationService} from './translationService';
 import {ConfigService} from './configService';
 import {NextIntlConfig, MessageConfig} from '../interfaces/nextIntlConfig';
+import {
+  DiagnosticInfo,
+  MissingNestedKeys,
+  MissingTranslation
+} from '../interfaces/diagnostics';
 
 export class DiagnosticService {
   private readonly diagnosticCollection: vscode.DiagnosticCollection;
@@ -18,53 +23,80 @@ export class DiagnosticService {
       vscode.languages.createDiagnosticCollection('next-intl-hlpr');
   }
 
+  /**
+   * Initialize the diagnostic service
+   */
   async initialize(): Promise<void> {
     await this.setupFileWatcher();
   }
 
+  /**
+   * Set up file watcher for translation files
+   */
   public async setupFileWatcher(): Promise<void> {
     // Dispose existing watcher if any
     if (this.fileWatcher) {
       this.fileWatcher.dispose();
     }
 
-    // Create new watcher for all JSON files in the messages directory
     const config = await this.configService.getNextIntlConfig();
     if (!config) {
       return;
     }
 
     const messagesDir = path.dirname(config.requestPath);
-    const pattern = new vscode.RelativePattern(
+    const pattern = this.createMessagesGlobPattern(messagesDir);
+
+    this.fileWatcher = vscode.workspace.createFileSystemWatcher(pattern);
+    this.registerFileWatcherHandlers();
+  }
+
+  /**
+   * Creates a glob pattern for translation files
+   */
+  private createMessagesGlobPattern(
+    messagesDir: string
+  ): vscode.RelativePattern {
+    return new vscode.RelativePattern(
       vscode.workspace.getWorkspaceFolder(vscode.Uri.file(messagesDir))!,
       'messages/*.json'
     );
-
-    this.fileWatcher = vscode.workspace.createFileSystemWatcher(pattern);
-
-    this.fileWatcher.onDidChange(async (uri) => {
-      this.logger.log(`Translation file changed: ${uri.fsPath}`);
-      await this.translationService.reloadTranslations();
-      await this.updateDiagnostics(
-        await vscode.workspace.openTextDocument(uri)
-      );
-    });
-
-    this.fileWatcher.onDidCreate(async (uri) => {
-      this.logger.log(`New translation file created: ${uri.fsPath}`);
-      await this.translationService.reloadTranslations();
-      await this.updateDiagnostics(
-        await vscode.workspace.openTextDocument(uri)
-      );
-    });
-
-    this.fileWatcher.onDidDelete(async (uri) => {
-      this.logger.log(`Translation file deleted: ${uri.fsPath}`);
-      await this.translationService.reloadTranslations();
-      this.clearDiagnostics(uri);
-    });
   }
 
+  /**
+   * Register event handlers for file watcher
+   */
+  private registerFileWatcherHandlers(): void {
+    if (!this.fileWatcher) {
+      return;
+    }
+
+    this.fileWatcher.onDidChange(this.handleFileChange.bind(this));
+    this.fileWatcher.onDidCreate(this.handleFileChange.bind(this));
+    this.fileWatcher.onDidDelete(this.handleFileDelete.bind(this));
+  }
+
+  /**
+   * Handler for file change/create events
+   */
+  private async handleFileChange(uri: vscode.Uri): Promise<void> {
+    this.logger.log(`Translation file changed/created: ${uri.fsPath}`);
+    await this.translationService.reloadTranslations();
+    await this.updateDiagnostics(await vscode.workspace.openTextDocument(uri));
+  }
+
+  /**
+   * Handler for file delete events
+   */
+  private async handleFileDelete(uri: vscode.Uri): Promise<void> {
+    this.logger.log(`Translation file deleted: ${uri.fsPath}`);
+    await this.translationService.reloadTranslations();
+    this.clearDiagnostics(uri);
+  }
+
+  /**
+   * Update diagnostics for a document and related files
+   */
   async updateDiagnostics(document: vscode.TextDocument): Promise<void> {
     if (document.languageId !== 'json') {
       return;
@@ -73,13 +105,8 @@ export class DiagnosticService {
     this.logger.log(`Updating diagnostics for: ${document.uri.fsPath}`);
 
     try {
-      const config = await this.configService.getNextIntlConfig();
-      if (!config) {
-        return;
-      }
-
-      const messageConfig = this.configService.getMessageConfig();
-      if (!messageConfig) {
+      const [config, messageConfig] = await this.getConfigurations();
+      if (!config || !messageConfig) {
         return;
       }
 
@@ -88,23 +115,48 @@ export class DiagnosticService {
       const locales = allTranslations.map((t) => t.locale);
 
       // Update diagnostics for all translation files
-      for (const locale of locales) {
-        const filePath = this.resolveMessagePath(config, messageConfig, locale);
-        const uri = vscode.Uri.file(filePath);
-
-        try {
-          const doc = await vscode.workspace.openTextDocument(uri);
-          await this.updateFileDiagnostics(doc);
-        } catch (error) {
-          // File might not exist yet, that's okay
-          this.logger.log(`Could not open file ${filePath}: ${error}`);
-        }
-      }
+      await this.updateDiagnosticsForAllLocales(config, messageConfig, locales);
     } catch (error) {
       this.logger.log('Error updating diagnostics', error);
     }
   }
 
+  /**
+   * Retrieves configuration objects needed for diagnostics
+   */
+  private async getConfigurations(): Promise<
+    [NextIntlConfig | undefined, MessageConfig | undefined]
+  > {
+    const config = await this.configService.getNextIntlConfig();
+    const messageConfig = this.configService.getMessageConfig();
+    return [config, messageConfig];
+  }
+
+  /**
+   * Updates diagnostics for all locales
+   */
+  private async updateDiagnosticsForAllLocales(
+    config: NextIntlConfig,
+    messageConfig: MessageConfig,
+    locales: string[]
+  ): Promise<void> {
+    for (const locale of locales) {
+      const filePath = this.resolveMessagePath(config, messageConfig, locale);
+      const uri = vscode.Uri.file(filePath);
+
+      try {
+        const doc = await vscode.workspace.openTextDocument(uri);
+        await this.updateFileDiagnostics(doc);
+      } catch (error) {
+        // File might not exist yet, that's okay
+        this.logger.log(`Could not open file ${filePath}: ${error}`);
+      }
+    }
+  }
+
+  /**
+   * Update diagnostics for a specific translation file
+   */
   private async updateFileDiagnostics(
     document: vscode.TextDocument
   ): Promise<void> {
@@ -124,11 +176,7 @@ export class DiagnosticService {
     const currentContent = JSON.parse(document.getText());
     const currentKeys = this.getAllKeys(currentContent);
 
-    const {
-      missingNestedKeysByParent,
-      missingTranslationsByKey,
-      missingParentKeys
-    } = await this.analyzeMissingTranslations(
+    const diagnosticInfo = await this.analyzeMissingTranslations(
       currentLocale,
       currentTranslation,
       currentKeys,
@@ -137,9 +185,7 @@ export class DiagnosticService {
 
     const diagnostics = this.createDiagnostics(
       document,
-      missingNestedKeysByParent,
-      missingTranslationsByKey,
-      missingParentKeys,
+      diagnosticInfo,
       currentKeys
     );
 
@@ -149,18 +195,21 @@ export class DiagnosticService {
     this.diagnosticCollection.set(document.uri, diagnostics);
   }
 
+  /**
+   * Analyzes missing translations between locales
+   */
   private async analyzeMissingTranslations(
     currentLocale: string,
     currentTranslation: any,
     currentKeys: string[],
     document: vscode.TextDocument
-  ) {
-    const missingNestedKeysByParent = new Map<
-      string,
-      Map<string, Set<string>>
-    >();
-    const missingTranslationsByKey = new Map<string, Set<string>>();
-    const missingParentKeys = new Map<string, Set<string>>();
+  ): Promise<DiagnosticInfo> {
+    const diagnosticInfo: DiagnosticInfo = {
+      missingNestedKeysByParent: new Map(),
+      missingTranslationsByKey: new Map(),
+      missingParentKeys: new Map()
+    };
+
     const allTranslations = this.translationService.getAllTranslations();
 
     for (const translation of allTranslations) {
@@ -172,7 +221,7 @@ export class DiagnosticService {
       this.checkMissingTranslations(
         translation,
         currentTranslation,
-        missingTranslationsByKey
+        diagnosticInfo.missingTranslationsByKey
       );
 
       // Compare nested keys between locales
@@ -180,16 +229,11 @@ export class DiagnosticService {
         translation,
         currentKeys,
         document,
-        missingNestedKeysByParent,
-        missingParentKeys
+        diagnosticInfo
       );
     }
 
-    return {
-      missingNestedKeysByParent,
-      missingTranslationsByKey,
-      missingParentKeys
-    };
+    return diagnosticInfo;
   }
 
   /**
@@ -199,11 +243,9 @@ export class DiagnosticService {
     translation: any,
     currentKeys: string[],
     document: vscode.TextDocument,
-    missingNestedKeysByParent: Map<string, Map<string, Set<string>>>,
-    missingParentKeys: Map<string, Set<string>>
+    diagnosticInfo: DiagnosticInfo
   ): Promise<void> {
-    const config = await this.configService.getNextIntlConfig();
-    const messageConfig = this.configService.getMessageConfig();
+    const [config, messageConfig] = await this.getConfigurations();
     if (!config || !messageConfig) {
       return;
     }
@@ -228,7 +270,7 @@ export class DiagnosticService {
         otherKeys,
         currentKeys,
         translation.locale,
-        missingNestedKeysByParent
+        diagnosticInfo.missingNestedKeysByParent
       );
 
       // Compare parent keys
@@ -236,7 +278,7 @@ export class DiagnosticService {
         otherKeys,
         currentKeys,
         translation.locale,
-        missingParentKeys
+        diagnosticInfo.missingParentKeys
       );
     } catch (error) {
       this.logger.log(`Error comparing translation keys: ${error}`);
@@ -324,7 +366,7 @@ export class DiagnosticService {
     translation: any,
     currentTranslation: any,
     missingTranslationsByKey: Map<string, Set<string>>
-  ) {
+  ): void {
     // Only check for missing translations in the current file's keys
     for (const [key, value] of currentTranslation.messages) {
       if (!translation.messages.has(key)) {
@@ -357,11 +399,12 @@ export class DiagnosticService {
     missingTranslationsByKey.get(targetKey)!.add(locale);
   }
 
+  /**
+   * Creates diagnostic objects from analyzed translation data
+   */
   private createDiagnostics(
     document: vscode.TextDocument,
-    missingNestedKeysByParent: Map<string, Map<string, Set<string>>>,
-    missingTranslationsByKey: Map<string, Set<string>>,
-    missingParentKeys: Map<string, Set<string>>,
+    diagnosticInfo: DiagnosticInfo,
     currentKeys: string[]
   ): vscode.Diagnostic[] {
     const diagnostics: vscode.Diagnostic[] = [];
@@ -369,22 +412,25 @@ export class DiagnosticService {
     // Add diagnostics for all types of issues
     this.addDiagnosticsForNestedKeys(
       document,
-      missingNestedKeysByParent,
+      diagnosticInfo.missingNestedKeysByParent,
       diagnostics
     );
+
     this.addDiagnosticsForMissingTranslations(
       document,
-      missingTranslationsByKey,
+      diagnosticInfo.missingTranslationsByKey,
       diagnostics
     );
+
     this.addDiagnosticsForMissingParentTranslations(
       document,
       currentKeys,
       diagnostics
     );
+
     this.addDiagnosticsForMissingParentKeys(
       document,
-      missingParentKeys,
+      diagnosticInfo.missingParentKeys,
       diagnostics
     );
 
@@ -402,10 +448,10 @@ export class DiagnosticService {
     for (const [parentKey, localeKeys] of missingNestedKeysByParent) {
       const range = this.findKeyRange(document, parentKey);
       if (range) {
-        const message = this.createMissingNestedKeysMessage(
+        const message = this.createMissingNestedKeysMessage({
           parentKey,
           localeKeys
-        );
+        });
         diagnostics.push(this.createDiagnostic(range, message));
       }
     }
@@ -435,10 +481,11 @@ export class DiagnosticService {
         // Regular translation key
         const range = this.findKeyRange(document, key);
         if (range) {
-          const message = this.createMissingTranslationMessage(
+          const message = this.createMissingTranslationMessage({
             key,
-            missingLocales
-          );
+            missingLocales,
+            isParentKey: false
+          });
           diagnostics.push(this.createDiagnostic(range, message));
         }
       }
@@ -493,6 +540,9 @@ export class DiagnosticService {
     }
   }
 
+  /**
+   * Creates a diagnostic object
+   */
   private createDiagnostic(
     range: vscode.Range,
     message: string
@@ -506,6 +556,9 @@ export class DiagnosticService {
     return diagnostic;
   }
 
+  /**
+   * Gets all keys from an object, flattened with dot notation
+   */
   private getAllKeys(obj: any, prefix = ''): string[] {
     const keys: string[] = [];
     this.traverseObject(obj, prefix, keys);
@@ -514,9 +567,6 @@ export class DiagnosticService {
 
   /**
    * Recursively traverses an object to extract all key paths
-   * @param obj The object to traverse
-   * @param prefix Current key prefix
-   * @param keys Array to collect all keys
    */
   private traverseObject(obj: any, prefix = '', keys: string[] = []): void {
     if (!obj || typeof obj !== 'object') {
@@ -533,21 +583,21 @@ export class DiagnosticService {
     }
   }
 
+  /**
+   * Creates a diagnostic for missing parent translation
+   */
   private createMissingParentTranslationDiagnostic(
     range: vscode.Range,
     key: string,
     parentKey: string
   ): vscode.Diagnostic {
     const message = `Missing parent translation "${parentKey}" for key "${key}"`;
-    const diagnostic = new vscode.Diagnostic(
-      range,
-      message,
-      vscode.DiagnosticSeverity.Warning
-    );
-    diagnostic.source = 'next-intl-hlpr';
-    return diagnostic;
+    return this.createDiagnostic(range, message);
   }
 
+  /**
+   * Extracts the locale from a file path
+   */
   private getCurrentLocale(filePath: string): string | undefined {
     const fileName = path.basename(filePath);
     const regex = /([a-z]{2})\.json$/;
@@ -555,6 +605,9 @@ export class DiagnosticService {
     return match ? match[1] : undefined;
   }
 
+  /**
+   * Finds the range for a key in a document
+   */
   private findKeyRange(
     document: vscode.TextDocument,
     key: string
@@ -563,19 +616,40 @@ export class DiagnosticService {
     const keyParts = key.split('.');
 
     if (keyParts.length === 1) {
-      // Simple key, search for it directly
-      const keyPattern = new RegExp(`"${keyParts[0]}"\\s*:`, 'g');
-      const match = keyPattern.exec(text);
-      if (!match) {
-        return undefined;
-      }
-
-      const startPos = document.positionAt(match.index);
-      const endPos = document.positionAt(match.index + match[0].length);
-      return new vscode.Range(startPos, endPos);
+      return this.findSimpleKeyRange(document, text, keyParts[0]);
     }
 
-    // For nested keys, search for the specific key in its proper path context
+    // For nested keys, try more complex search methods
+    return this.findNestedKeyRange(document, text, keyParts);
+  }
+
+  /**
+   * Finds a simple (non-nested) key in a document
+   */
+  private findSimpleKeyRange(
+    document: vscode.TextDocument,
+    text: string,
+    key: string
+  ): vscode.Range | undefined {
+    const keyPattern = new RegExp(`"${key}"\\s*:`, 'g');
+    const match = keyPattern.exec(text);
+    if (!match) {
+      return undefined;
+    }
+
+    const startPos = document.positionAt(match.index);
+    const endPos = document.positionAt(match.index + match[0].length);
+    return new vscode.Range(startPos, endPos);
+  }
+
+  /**
+   * Finds a nested key in a document
+   */
+  private findNestedKeyRange(
+    document: vscode.TextDocument,
+    text: string,
+    keyParts: string[]
+  ): vscode.Range | undefined {
     try {
       const content = JSON.parse(text);
 
@@ -602,20 +676,17 @@ export class DiagnosticService {
         'JSON parsing failed in findKeyRange, using fallback search',
         error
       );
-      const lastKey = keyParts[keyParts.length - 1];
-      const keyPattern = new RegExp(`"${lastKey}"\\s*:`, 'g');
-      const match = keyPattern.exec(text);
-
-      if (!match) {
-        return undefined;
-      }
-
-      const startPos = document.positionAt(match.index);
-      const endPos = document.positionAt(match.index + match[0].length);
-      return new vscode.Range(startPos, endPos);
+      return this.findSimpleKeyRange(
+        document,
+        text,
+        keyParts[keyParts.length - 1]
+      );
     }
   }
 
+  /**
+   * Finds a nested key in text by traversing through each part
+   */
   private findNestedKeyInText(
     document: vscode.TextDocument,
     text: string,
@@ -654,13 +725,18 @@ export class DiagnosticService {
     return undefined;
   }
 
+  /**
+   * Creates a message for missing translation
+   */
   private createMissingTranslationMessage(
-    key: string,
-    missingLocales: Set<string>
+    missingTranslation: MissingTranslation
   ): string {
-    return `Missing translations for key "${key}" in:\n${Array.from(missingLocales).join(', ')}`;
+    return `Missing translations for key "${missingTranslation.key}" in:\n${Array.from(missingTranslation.missingLocales).join(', ')}`;
   }
 
+  /**
+   * Creates a message for missing parent key
+   */
   private createMissingParentKeyMessage(
     key: string,
     missingLocales: Set<string>
@@ -668,17 +744,22 @@ export class DiagnosticService {
     return `Missing key "${key}" in:\n${Array.from(missingLocales).join(', ')}`;
   }
 
+  /**
+   * Creates a message for missing nested keys
+   */
   private createMissingNestedKeysMessage(
-    parentKey: string,
-    localeKeys: Map<string, Set<string>>
+    missingNestedKeys: MissingNestedKeys
   ): string {
-    const lines = [`Missing translations in "${parentKey}":`];
-    for (const [locale, keys] of localeKeys) {
+    const lines = [`Missing translations in "${missingNestedKeys.parentKey}":`];
+    for (const [locale, keys] of missingNestedKeys.localeKeys) {
       lines.push(`${locale} - ${Array.from(keys).join(', ')}`);
     }
     return lines.join('\n');
   }
 
+  /**
+   * Creates a message for missing parent keys
+   */
   private createMissingParentKeysMessage(
     missingParentKeys: Map<string, Set<string>>
   ): string {
@@ -690,6 +771,9 @@ export class DiagnosticService {
     return lines.join('\n');
   }
 
+  /**
+   * Finds the opening brace in a document
+   */
   private findOpeningBraceRange(
     document: vscode.TextDocument
   ): vscode.Range | undefined {
@@ -703,10 +787,16 @@ export class DiagnosticService {
     return new vscode.Range(position, position.translate(0, 1));
   }
 
+  /**
+   * Clears diagnostics for a file
+   */
   clearDiagnostics(uri: vscode.Uri): void {
     this.diagnosticCollection.delete(uri);
   }
 
+  /**
+   * Disposes of resources
+   */
   dispose(): void {
     if (this.fileWatcher) {
       this.fileWatcher.dispose();
@@ -714,6 +804,9 @@ export class DiagnosticService {
     this.diagnosticCollection.dispose();
   }
 
+  /**
+   * Resolves the path to a message file for a locale
+   */
   private resolveMessagePath(
     config: NextIntlConfig,
     messageConfig: MessageConfig,

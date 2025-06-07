@@ -769,16 +769,14 @@ suite('Extension Tests', () => {
         [documentStub.uri, diagnostics]
       ];
 
-      // Set up the diagnosticCollectionStub.set to return our entries
-      diagnosticCollectionStub.set.callsFake((entries: any) => {
-        // Just store the entries for testing
-        diagnosticCollectionStub.entries = entries;
-      });
-
       // Call the createMissingTranslationMessage directly to verify it produces the expected message
       const message = (
         diagnosticService as any
-      ).createMissingTranslationMessage('missing_key', new Set(['es']));
+      ).createMissingTranslationMessage({
+        key: 'missing_key',
+        missingLocales: new Set(['es']),
+        isParentKey: false
+      });
 
       // Verify the message format is correct
       assert(
@@ -998,8 +996,10 @@ suite('Extension Tests', () => {
 
       // Call the createMissingNestedKeysMessage directly to verify it produces the expected message
       const message = (diagnosticService as any).createMissingNestedKeysMessage(
-        'HomePage',
-        localeKeys
+        {
+          parentKey: 'HomePage',
+          localeKeys: localeKeys
+        }
       );
 
       // Create a diagnostic directly
