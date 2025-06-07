@@ -55,6 +55,7 @@
     "lint": "eslint src --ext ts",
     "test": "vscode-test",
     "test:unit": "mocha \"out/test/utils/*.test.js\" \"out/test/simple.test.js\" \"out/test/demo.test.js\" --require ./test-setup.js --ui bdd",
+    "test:diagnostics": "mocha \"out/test/services/diagnosticService.test.js\" --require ./test-setup.js --ui bdd",
     "test:coverage": "nyc npm run test:unit",
     "pretest": "npm run compile && npm run lint",
     "test:watch": "npm run compile && npm run test:unit -- --watch"

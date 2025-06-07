@@ -120,3 +120,102 @@ Module.prototype.require = function (id) {
   }
   return originalRequire.apply(this, arguments);
 };
+
+// Define suite and test if not already defined (for running with standalone mocha)
+global.suite =
+  global.suite ||
+  function (name, fn) {
+    describe(name, fn);
+  };
+
+global.test =
+  global.test ||
+  function (name, fn) {
+    it(name, fn);
+  };
+
+global.setup =
+  global.setup ||
+  function (fn) {
+    before(fn);
+  };
+
+global.teardown =
+  global.teardown ||
+  function (fn) {
+    after(fn);
+  };
+
+global.suiteSetup =
+  global.suiteSetup ||
+  function (fn) {
+    before(fn);
+  };
+
+global.suiteTeardown =
+  global.suiteTeardown ||
+  function (fn) {
+    after(fn);
+  };
+
+// Mock vscode
+const vscode = {
+  Range: class Range {
+    constructor(startLine, startCharacter, endLine, endCharacter) {
+      this.start = {line: startLine, character: startCharacter};
+      this.end = {line: endLine, character: endCharacter};
+    }
+  },
+  Position: class Position {
+    constructor(line, character) {
+      this.line = line;
+      this.character = character;
+    }
+    translate(lineDelta, characterDelta) {
+      return new vscode.Position(
+        this.line + lineDelta,
+        this.character + characterDelta
+      );
+    }
+  },
+  Uri: {
+    file: (path) => ({fsPath: path})
+  },
+  DiagnosticSeverity: {
+    Warning: 1,
+    Error: 2,
+    Information: 3,
+    Hint: 4
+  },
+  Diagnostic: class Diagnostic {
+    constructor(range, message, severity) {
+      this.range = range;
+      this.message = message;
+      this.severity = severity;
+    }
+  },
+  languages: {
+    createDiagnosticCollection: () => ({
+      set: () => {},
+      delete: () => {},
+      dispose: () => {}
+    })
+  },
+  workspace: {
+    fs: {
+      readFile: async () => Buffer.from('{}')
+    },
+    createFileSystemWatcher: () => ({
+      onDidChange: () => {},
+      onDidCreate: () => {},
+      onDidDelete: () => {},
+      dispose: () => {}
+    }),
+    openTextDocument: async () => {}
+  }
+};
+
+// Mock the vscode module
+if (!global.vscode) {
+  global.vscode = vscode;
+}

@@ -951,5 +951,146 @@ suite('DiagnosticService Tests', () => {
       assert(missingTranslationsWarning.message.includes('es'));
       assert(missingTranslationsWarning.message.includes('fr'));
     });
+
+    test('should show "Missing parent translation" warning', async () => {
+      const mockConfig = {
+        locales: ['en'],
+        defaultLocale: 'en',
+        messagesPath: 'messages/${locale}.json',
+        requestPath: '/test/workspace/i18n/request.ts'
+      };
+
+      const mockTranslations = [
+        {
+          locale: 'en',
+          messages: new Map([['HomePage.title', 'Hello world!']])
+        }
+      ];
+
+      // Content has nested structure but no explicit parent key
+      const enContent = {
+        HomePage: {
+          title: 'Hello world!'
+        }
+      };
+
+      const allKeys = ['HomePage.title'];
+
+      configServiceStub.getNextIntlConfig.resolves(mockConfig);
+      translationServiceStub.getAllTranslations.returns(mockTranslations);
+      documentStub.getText.returns(JSON.stringify(enContent));
+
+      // Mock finding key range for 'HomePage.title'
+      const keyRange = new vscode.Range(
+        new vscode.Position(1, 5),
+        new vscode.Position(1, 14)
+      );
+      const findKeyRangeStub = sinon
+        .stub(diagnosticService as any, 'findKeyRange')
+        .returns(keyRange);
+
+      // Mock getAllKeys to return our predefined keys
+      const getAllKeysStub = sinon
+        .stub(diagnosticService as any, 'getAllKeys')
+        .returns(allKeys);
+
+      await (diagnosticService as any).updateFileDiagnostics(documentStub);
+
+      const setCall = diagnosticCollectionStub.set.getCall(0);
+      const entries = setCall.args[0] as readonly [
+        vscode.Uri,
+        readonly vscode.Diagnostic[] | undefined
+      ][];
+      const diagnostics = entries[0][1] as vscode.Diagnostic[];
+
+      const missingParentTranslationWarning = diagnostics.find(
+        (d: vscode.Diagnostic) =>
+          d.message.includes(
+            'Missing parent translation "HomePage" for key "HomePage.title"'
+          )
+      );
+
+      assert(missingParentTranslationWarning);
+      assert(missingParentTranslationWarning.message.includes('HomePage'));
+      assert(
+        missingParentTranslationWarning.message.includes('HomePage.title')
+      );
+
+      // Restore stubs
+      findKeyRangeStub.restore();
+      getAllKeysStub.restore();
+    });
+
+    test('should show "Missing keys in this file" warning', async () => {
+      const mockConfig = {
+        locales: ['en', 'es'],
+        defaultLocale: 'en',
+        messagesPath: 'messages/${locale}.json',
+        requestPath: '/test/workspace/i18n/request.ts'
+      };
+
+      const mockTranslations = [
+        {
+          locale: 'en',
+          messages: new Map([['welcome', 'Welcome']])
+        },
+        {
+          locale: 'es',
+          messages: new Map([
+            ['welcome', 'Bienvenido'],
+            ['Header', '[object]'], // Parent key that exists in Spanish but not in English
+            ['Header.title', 'Mi aplicación web']
+          ])
+        }
+      ];
+
+      const enContent = {
+        welcome: 'Welcome'
+      };
+      const esContent = {
+        welcome: 'Bienvenido',
+        Header: {
+          title: 'Mi aplicación web'
+        }
+      };
+
+      configServiceStub.getNextIntlConfig.resolves(mockConfig);
+      translationServiceStub.getAllTranslations.returns(mockTranslations);
+      documentStub.getText.returns(JSON.stringify(enContent));
+      documentStub.positionAt.withArgs(0).returns(new vscode.Position(0, 0));
+
+      // Mock the opening brace range for placing the file-level warning
+      const openingBraceRange = new vscode.Range(
+        new vscode.Position(0, 0),
+        new vscode.Position(0, 1)
+      );
+      const findOpeningBraceRangeStub = sinon
+        .stub(diagnosticService as any, 'findOpeningBraceRange')
+        .returns(openingBraceRange);
+
+      readFileStub
+        .withArgs(vscode.Uri.file('/test/workspace/messages/es.json'))
+        .resolves(Buffer.from(JSON.stringify(esContent)));
+
+      await (diagnosticService as any).updateFileDiagnostics(documentStub);
+
+      const setCall = diagnosticCollectionStub.set.getCall(0);
+      const entries = setCall.args[0] as readonly [
+        vscode.Uri,
+        readonly vscode.Diagnostic[] | undefined
+      ][];
+      const diagnostics = entries[0][1] as vscode.Diagnostic[];
+
+      const missingKeysWarning = diagnostics.find((d: vscode.Diagnostic) =>
+        d.message.includes('Missing keys in this file')
+      );
+
+      assert(missingKeysWarning);
+      assert(missingKeysWarning.message.includes('Header'));
+      assert(missingKeysWarning.message.includes('present in: es'));
+
+      // Restore stub
+      findOpeningBraceRangeStub.restore();
+    });
   });
 });
