@@ -32,7 +32,6 @@ Download at [VSCode Marketplace](https://marketplace.visualstudio.com/items?item
 - The extension detects the structure automatically (`auto` mode prioritizes folder mode) or uses the configured mode.
 - A workspace folder must be open in VS Code.
 - JSON files must be valid (malformed JSON will trigger an error notification).
-- The extension uses `jsonc-parser` for robust JSON parsing. If building from source, ensure `jsonc-parser` is installed (`npm install jsonc-parser`).
 
 ## Extension Settings
 
@@ -182,7 +181,6 @@ Renaming `common.json` to `newCommon.json` will automatically update diagnostics
 ## Known Limitations
 
 - Language codes (e.g., `en`, `de`) are not validated; any folder or file name is treated as a language.
-- JSONC (JSON with comments) is parsed correctly, but comments are ignored and do not affect translation key detection.
 - Multi-root workspaces use the first workspace folder containing the translations folder.
 
 ## Release Notes

@@ -1,0 +1,16 @@
+{
+    "groupA": {
+        "tooShort": "Muito curto"
+    },
+    "groupC": {
+        "tooLong": "Muito longo"
+    },
+    "groupD": {
+        "groupD1": {
+            "tooShort": "Muito curto"
+        },
+        "groupD2": {
+            "tooLong": "Muito longo"
+        }
+    }
+}

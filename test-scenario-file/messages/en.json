@@ -3,6 +3,13 @@
         "title": "Hello world!",
         "about": "Go to the about page"
     },
+    "Body": {
+        "firstLevel": {
+            "secondLevel": {
+                "thirdLevel": "Third level"
+            }
+        }
+    },
     "Footer": {
         "privacy": "Privacy Policy"
     }

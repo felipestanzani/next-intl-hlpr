@@ -1,0 +1,17 @@
+{
+    "groupA": {
+        "tooShort": "Too short"
+    },
+    "groupB": {
+        "tooLong": "Too long"
+    },
+    "groupC": {
+        "tooShort": "Too short",
+        "tooLong": "Too long"
+    },
+    "groupD": {
+        "groupD1": {
+            "tooShort": "Too short"
+        }
+    }
+}

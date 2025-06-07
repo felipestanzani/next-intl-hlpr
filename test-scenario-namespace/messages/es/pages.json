@@ -1,0 +1,10 @@
+{
+    "HomePage": {
+        "title": "¡Hola mundo!",
+        "description": "Esta es una página de prueba",
+        "about": "Ir a la página acerca de"
+    },
+    "Header": {
+        "title": "Mi aplicación web"
+    }
+}

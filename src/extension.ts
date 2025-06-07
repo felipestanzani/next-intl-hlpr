@@ -73,11 +73,13 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   fileWatcher.onDidChange(async (uri) => {
+    logger.log(`File changed: ${uri.fsPath}`);
     const document = await vscode.workspace.openTextDocument(uri);
     await diagnosticService.updateDiagnostics(document);
   });
 
   fileWatcher.onDidCreate(async (uri) => {
+    logger.log(`File created: ${uri.fsPath}`);
     const document = await vscode.workspace.openTextDocument(uri);
     // Reinitialize translation service to include the new language
     await translationService.initialize();
@@ -85,6 +87,7 @@ export async function activate(context: vscode.ExtensionContext) {
   });
 
   fileWatcher.onDidDelete((uri) => {
+    logger.log(`File deleted: ${uri.fsPath}`);
     diagnosticService.clearDiagnostics(uri);
   });
 
