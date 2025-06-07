@@ -1,7 +1,6 @@
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import * as vscode from 'vscode';
-import * as path from 'path';
 import {activate, deactivate} from '../extension';
 import {DiagnosticService} from '../services/diagnosticService';
 import {TranslationService} from '../services/translationService';
@@ -738,11 +737,6 @@ suite('Extension Tests', () => {
         dispose: sinon.stub()
       };
 
-      // Create a stub for languages.createDiagnosticCollection
-      const createDiagnosticCollectionStub = sinon
-        .stub(vscode.languages, 'createDiagnosticCollection')
-        .returns(diagnosticCollectionStub);
-
       // Initialize the diagnostic service
       diagnosticService = new DiagnosticService(
         loggerStub as any,
@@ -752,8 +746,7 @@ suite('Extension Tests', () => {
 
       // Instead of stubbing readFile directly, we'll mock the implementation
       // of the methods that use it in DiagnosticService
-      sinon.stub(diagnosticService as any, 'checkMissingNestedKeys').resolves();
-      sinon.stub(diagnosticService as any, 'checkMissingParentKeys').resolves();
+      sinon.stub(diagnosticService as any, 'compareTranslationKeys').resolves();
     });
 
     teardown(() => {
@@ -761,34 +754,6 @@ suite('Extension Tests', () => {
     });
 
     test('should show "Missing translations for key" warning', async () => {
-      const mockConfig = {
-        locales: ['en', 'es'],
-        defaultLocale: 'en',
-        messagesPath: 'messages/${locale}.json',
-        requestPath: '/test/workspace/i18n/request.ts'
-      };
-
-      const mockMessageConfig = {
-        loadPath: 'messages/${locale}.json',
-        namespaces: ['common'],
-        defaultNamespace: 'common',
-        dynamicImport: true
-      };
-
-      const mockTranslations = [
-        {
-          locale: 'en',
-          messages: new Map([
-            ['welcome', 'Welcome'],
-            ['missing_key', 'This key is missing in ES']
-          ])
-        },
-        {
-          locale: 'es',
-          messages: new Map([['welcome', 'Bienvenido']])
-        }
-      ];
-
       const keyRange = new vscode.Range(0, 0, 0, 10);
 
       // Create a diagnostic directly

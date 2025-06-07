@@ -168,23 +168,19 @@ export class DiagnosticService {
         continue;
       }
 
+      // Check for missing translations (keys in current locale but missing in other locales)
       this.checkMissingTranslations(
         translation,
         currentTranslation,
         missingTranslationsByKey
       );
 
-      await this.checkMissingNestedKeys(
+      // Compare nested keys between locales
+      await this.compareTranslationKeys(
         translation,
         currentKeys,
         document,
-        missingNestedKeysByParent
-      );
-
-      await this.checkMissingParentKeys(
-        translation,
-        currentKeys,
-        document,
+        missingNestedKeysByParent,
         missingParentKeys
       );
     }
@@ -196,116 +192,69 @@ export class DiagnosticService {
     };
   }
 
-  private checkMissingTranslations(
-    translation: any,
-    currentTranslation: any,
-    missingTranslationsByKey: Map<string, Set<string>>
-  ) {
-    // Only check for missing translations in the current file's keys
-    for (const [key, value] of currentTranslation.messages) {
-      if (!translation.messages.has(key)) {
-        // Check if this is a parent key (marked with '[object]') or leaf key (has translation value)
-        const isParentKey = value === '[object]';
-
-        if (isParentKey) {
-          // For parent keys, use the parent key message
-          this.addMissingParentKey(
-            key,
-            translation.locale,
-            missingTranslationsByKey
-          );
-        } else {
-          // For leaf keys, use the translation message
-          this.addMissingTranslation(
-            key,
-            translation.locale,
-            missingTranslationsByKey
-          );
-        }
-      }
-    }
-  }
-
-  private addMissingTranslation(
-    key: string,
-    locale: string,
-    missingTranslationsByKey: Map<string, Set<string>>
-  ) {
-    if (!missingTranslationsByKey.has(key)) {
-      missingTranslationsByKey.set(key, new Set());
-    }
-    missingTranslationsByKey.get(key)!.add(locale);
-  }
-
-  private addMissingParentKey(
-    key: string,
-    locale: string,
-    missingTranslationsByKey: Map<string, Set<string>>
-  ) {
-    // We'll use a special prefix to mark parent keys
-    const parentKeyMarker = `__PARENT__${key}`;
-    if (!missingTranslationsByKey.has(parentKeyMarker)) {
-      missingTranslationsByKey.set(parentKeyMarker, new Set());
-    }
-    missingTranslationsByKey.get(parentKeyMarker)!.add(locale);
-  }
-
-  private async checkMissingNestedKeys(
+  /**
+   * Compares translation keys between locales to find missing keys and nested structures
+   */
+  private async compareTranslationKeys(
     translation: any,
     currentKeys: string[],
     document: vscode.TextDocument,
-    missingNestedKeysByParent: Map<string, Map<string, Set<string>>>
-  ) {
+    missingNestedKeysByParent: Map<string, Map<string, Set<string>>>,
+    missingParentKeys: Map<string, Set<string>>
+  ): Promise<void> {
     const config = await this.configService.getNextIntlConfig();
     const messageConfig = this.configService.getMessageConfig();
     if (!config || !messageConfig) {
       return;
     }
 
+    // Get keys from the other locale's translation file
     const otherFilePath = this.resolveMessagePath(
       config,
       messageConfig,
       translation.locale
     );
-    const otherContent = JSON.parse(
-      Buffer.from(
+
+    try {
+      const otherFileContent = Buffer.from(
         await vscode.workspace.fs.readFile(vscode.Uri.file(otherFilePath))
-      ).toString()
-    );
-    const otherKeys = this.getAllKeys(otherContent);
+      ).toString();
 
-    const currentParentKeys = this.groupKeysByParent(currentKeys);
-    const otherParentKeys = this.groupKeysByParent(otherKeys);
+      const otherContent = JSON.parse(otherFileContent);
+      const otherKeys = this.getAllKeys(otherContent);
 
-    this.compareParentKeys(
-      otherParentKeys,
-      currentParentKeys,
-      translation.locale,
-      missingNestedKeysByParent
-    );
-  }
+      // Compare nested keys
+      this.compareNestedKeys(
+        otherKeys,
+        currentKeys,
+        translation.locale,
+        missingNestedKeysByParent
+      );
 
-  private groupKeysByParent(keys: string[]): Map<string, Set<string>> {
-    const parentKeys = new Map<string, Set<string>>();
-    for (const key of keys) {
-      const keyParts = key.split('.');
-      if (keyParts.length > 1) {
-        const parentKey = keyParts[0];
-        if (!parentKeys.has(parentKey)) {
-          parentKeys.set(parentKey, new Set());
-        }
-        parentKeys.get(parentKey)!.add(key);
-      }
+      // Compare parent keys
+      this.compareParentKeys(
+        otherKeys,
+        currentKeys,
+        translation.locale,
+        missingParentKeys
+      );
+    } catch (error) {
+      this.logger.log(`Error comparing translation keys: ${error}`);
     }
-    return parentKeys;
   }
 
-  private compareParentKeys(
-    otherParentKeys: Map<string, Set<string>>,
-    currentParentKeys: Map<string, Set<string>>,
+  /**
+   * Compares nested keys between locales
+   */
+  private compareNestedKeys(
+    otherKeys: string[],
+    currentKeys: string[],
     locale: string,
     missingNestedKeysByParent: Map<string, Map<string, Set<string>>>
-  ) {
+  ): void {
+    const otherParentKeys = this.groupKeysByParent(otherKeys);
+    const currentParentKeys = this.groupKeysByParent(currentKeys);
+
     for (const [parentKey, otherNestedKeys] of otherParentKeys) {
       const currentNestedKeys = currentParentKeys.get(parentKey) || new Set();
       const missingNestedKeys = new Set<string>();
@@ -327,6 +276,87 @@ export class DiagnosticService {
     }
   }
 
+  /**
+   * Compares parent keys between locales
+   */
+  private compareParentKeys(
+    otherKeys: string[],
+    currentKeys: string[],
+    locale: string,
+    missingParentKeys: Map<string, Set<string>>
+  ): void {
+    // Get parent keys from both files
+    const currentParentKeys = this.extractParentKeys(currentKeys);
+    const otherParentKeys = this.extractParentKeys(otherKeys);
+
+    // Find parent keys that exist in other file but not in current file
+    for (const parentKey of otherParentKeys) {
+      if (!currentParentKeys.includes(parentKey)) {
+        if (!missingParentKeys.has(parentKey)) {
+          missingParentKeys.set(parentKey, new Set());
+        }
+        missingParentKeys.get(parentKey)!.add(locale);
+      }
+    }
+  }
+
+  /**
+   * Extracts parent keys from a list of keys
+   */
+  private extractParentKeys(keys: string[]): string[] {
+    const parentKeys = new Set<string>();
+    for (const key of keys) {
+      const keyParts = key.split('.');
+      if (keyParts.length > 1) {
+        parentKeys.add(keyParts[0]);
+      } else {
+        // Top-level keys are also parent keys
+        parentKeys.add(key);
+      }
+    }
+    return Array.from(parentKeys);
+  }
+
+  /**
+   * Checks for missing translations between locales
+   */
+  private checkMissingTranslations(
+    translation: any,
+    currentTranslation: any,
+    missingTranslationsByKey: Map<string, Set<string>>
+  ) {
+    // Only check for missing translations in the current file's keys
+    for (const [key, value] of currentTranslation.messages) {
+      if (!translation.messages.has(key)) {
+        const isParentKey = value === '[object]';
+        this.recordMissingKey(
+          key,
+          translation.locale,
+          missingTranslationsByKey,
+          isParentKey
+        );
+      }
+    }
+  }
+
+  /**
+   * Records a missing key or translation in the appropriate map
+   */
+  private recordMissingKey(
+    key: string,
+    locale: string,
+    missingTranslationsByKey: Map<string, Set<string>>,
+    isParentKey: boolean
+  ): void {
+    // For parent keys, use a special prefix to differentiate them
+    const targetKey = isParentKey ? `__PARENT__${key}` : key;
+
+    if (!missingTranslationsByKey.has(targetKey)) {
+      missingTranslationsByKey.set(targetKey, new Set());
+    }
+    missingTranslationsByKey.get(targetKey)!.add(locale);
+  }
+
   private createDiagnostics(
     document: vscode.TextDocument,
     missingNestedKeysByParent: Map<string, Map<string, Set<string>>>,
@@ -336,22 +366,23 @@ export class DiagnosticService {
   ): vscode.Diagnostic[] {
     const diagnostics: vscode.Diagnostic[] = [];
 
-    this.addNestedKeysDiagnostics(
+    // Add diagnostics for all types of issues
+    this.addDiagnosticsForNestedKeys(
       document,
       missingNestedKeysByParent,
       diagnostics
     );
-    this.addMissingTranslationsDiagnostics(
+    this.addDiagnosticsForMissingTranslations(
       document,
       missingTranslationsByKey,
       diagnostics
     );
-    this.addMissingParentTranslationsDiagnostics(
+    this.addDiagnosticsForMissingParentTranslations(
       document,
       currentKeys,
       diagnostics
     );
-    this.addMissingParentKeysDiagnostics(
+    this.addDiagnosticsForMissingParentKeys(
       document,
       missingParentKeys,
       diagnostics
@@ -360,7 +391,10 @@ export class DiagnosticService {
     return diagnostics;
   }
 
-  private addNestedKeysDiagnostics(
+  /**
+   * Adds diagnostics for missing nested keys
+   */
+  private addDiagnosticsForNestedKeys(
     document: vscode.TextDocument,
     missingNestedKeysByParent: Map<string, Map<string, Set<string>>>,
     diagnostics: vscode.Diagnostic[]
@@ -377,7 +411,10 @@ export class DiagnosticService {
     }
   }
 
-  private addMissingTranslationsDiagnostics(
+  /**
+   * Adds diagnostics for missing translations
+   */
+  private addDiagnosticsForMissingTranslations(
     document: vscode.TextDocument,
     missingTranslationsByKey: Map<string, Set<string>>,
     diagnostics: vscode.Diagnostic[]
@@ -408,7 +445,10 @@ export class DiagnosticService {
     }
   }
 
-  private addMissingParentTranslationsDiagnostics(
+  /**
+   * Adds diagnostics for missing parent translations
+   */
+  private addDiagnosticsForMissingParentTranslations(
     document: vscode.TextDocument,
     currentKeys: string[],
     diagnostics: vscode.Diagnostic[]
@@ -433,7 +473,10 @@ export class DiagnosticService {
     }
   }
 
-  private addMissingParentKeysDiagnostics(
+  /**
+   * Adds diagnostics for missing parent keys
+   */
+  private addDiagnosticsForMissingParentKeys(
     document: vscode.TextDocument,
     missingParentKeys: Map<string, Set<string>>,
     diagnostics: vscode.Diagnostic[]
@@ -464,15 +507,30 @@ export class DiagnosticService {
   }
 
   private getAllKeys(obj: any, prefix = ''): string[] {
-    let keys: string[] = [];
+    const keys: string[] = [];
+    this.traverseObject(obj, prefix, keys);
+    return keys;
+  }
+
+  /**
+   * Recursively traverses an object to extract all key paths
+   * @param obj The object to traverse
+   * @param prefix Current key prefix
+   * @param keys Array to collect all keys
+   */
+  private traverseObject(obj: any, prefix = '', keys: string[] = []): void {
+    if (!obj || typeof obj !== 'object') {
+      return;
+    }
+
     for (const key in obj) {
       const newKey = prefix ? `${prefix}.${key}` : key;
       keys.push(newKey);
+
       if (typeof obj[key] === 'object' && obj[key] !== null) {
-        keys = keys.concat(this.getAllKeys(obj[key], newKey));
+        this.traverseObject(obj[key], newKey, keys);
       }
     }
-    return keys;
   }
 
   private createMissingParentTranslationDiagnostic(
@@ -666,56 +724,21 @@ export class DiagnosticService {
     return path.join(basePath, loadPath);
   }
 
-  private async checkMissingParentKeys(
-    translation: any,
-    currentKeys: string[],
-    document: vscode.TextDocument,
-    missingParentKeys: Map<string, Set<string>>
-  ) {
-    const config = await this.configService.getNextIntlConfig();
-    const messageConfig = this.configService.getMessageConfig();
-    if (!config || !messageConfig) {
-      return;
-    }
-
-    const otherFilePath = this.resolveMessagePath(
-      config,
-      messageConfig,
-      translation.locale
-    );
-    const otherContent = JSON.parse(
-      Buffer.from(
-        await vscode.workspace.fs.readFile(vscode.Uri.file(otherFilePath))
-      ).toString()
-    );
-    const otherKeys = this.getAllKeys(otherContent);
-
-    // Get parent keys from both files
-    const currentParentKeys = this.getParentKeys(currentKeys);
-    const otherParentKeys = this.getParentKeys(otherKeys);
-
-    // Find parent keys that exist in other file but not in current file
-    for (const parentKey of otherParentKeys) {
-      if (!currentParentKeys.includes(parentKey)) {
-        if (!missingParentKeys.has(parentKey)) {
-          missingParentKeys.set(parentKey, new Set());
-        }
-        missingParentKeys.get(parentKey)!.add(translation.locale);
-      }
-    }
-  }
-
-  private getParentKeys(keys: string[]): string[] {
-    const parentKeys = new Set<string>();
+  /**
+   * Groups keys by their parent key
+   */
+  private groupKeysByParent(keys: string[]): Map<string, Set<string>> {
+    const parentKeys = new Map<string, Set<string>>();
     for (const key of keys) {
       const keyParts = key.split('.');
       if (keyParts.length > 1) {
-        parentKeys.add(keyParts[0]);
-      } else {
-        // Top-level keys are also parent keys
-        parentKeys.add(key);
+        const parentKey = keyParts[0];
+        if (!parentKeys.has(parentKey)) {
+          parentKeys.set(parentKey, new Set());
+        }
+        parentKeys.get(parentKey)!.add(key);
       }
     }
-    return Array.from(parentKeys);
+    return parentKeys;
   }
 }

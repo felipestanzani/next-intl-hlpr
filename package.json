@@ -10,7 +10,7 @@
     "url": "https://github.com/felipestanzani/next-intl-hlpr.git"
   },
   "engines": {
-    "vscode": "^1.100.0"
+    "vscode": "^1.96.2"
   },
   "categories": [
     "Linters",
@@ -62,7 +62,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.15.18",
-    "@types/vscode": "^1.100.0",
+    "@types/vscode": "^1.96.2",
     "@typescript-eslint/eslint-plugin": "^8.32.1",
     "@typescript-eslint/parser": "^8.32.1",
     "@types/mocha": "^10.0.6",

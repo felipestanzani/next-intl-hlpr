@@ -1,7 +1,6 @@
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import * as vscode from 'vscode';
-import * as path from 'path';
 import {DiagnosticService} from '../../services/diagnosticService';
 import {TranslationService} from '../../services/translationService';
 import {ConfigService} from '../../services/configService';
@@ -92,13 +91,6 @@ suite('DiagnosticService Tests', () => {
     openTextDocumentStub = sinon
       .stub(vscode.workspace, 'openTextDocument')
       .resolves(documentStub as any);
-    getWorkspaceFolderStub = sinon
-      .stub(vscode.workspace, 'getWorkspaceFolder')
-      .returns({
-        uri: {fsPath: '/test/workspace'},
-        name: 'test',
-        index: 0
-      } as any);
 
     diagnosticService = new DiagnosticService(
       loggerStub,
@@ -808,9 +800,9 @@ suite('DiagnosticService Tests', () => {
       await (diagnosticService as any).updateFileDiagnostics(documentStub);
 
       const setCall = diagnosticCollectionStub.set.getCall(0);
-      const entries = setCall.args[0] as readonly [
+      const entries = setCall.args[0] as [
         vscode.Uri,
-        readonly vscode.Diagnostic[] | undefined
+        vscode.Diagnostic[] | undefined
       ][];
       const diagnostics = entries[0][1] as vscode.Diagnostic[];
       const missingTranslationWarning = diagnostics.find(
@@ -865,9 +857,9 @@ suite('DiagnosticService Tests', () => {
       await (diagnosticService as any).updateFileDiagnostics(documentStub);
 
       const setCall = diagnosticCollectionStub.set.getCall(0);
-      const entries = setCall.args[0] as readonly [
+      const entries = setCall.args[0] as [
         vscode.Uri,
-        readonly vscode.Diagnostic[] | undefined
+        vscode.Diagnostic[] | undefined
       ][];
       const diagnostics = entries[0][1] as vscode.Diagnostic[];
       const missingKeyWarning = diagnostics.find((d: vscode.Diagnostic) =>
@@ -936,9 +928,9 @@ suite('DiagnosticService Tests', () => {
       await (diagnosticService as any).updateFileDiagnostics(documentStub);
 
       const setCall = diagnosticCollectionStub.set.getCall(0);
-      const entries = setCall.args[0] as readonly [
+      const entries = setCall.args[0] as [
         vscode.Uri,
-        readonly vscode.Diagnostic[] | undefined
+        vscode.Diagnostic[] | undefined
       ][];
       const diagnostics = entries[0][1] as vscode.Diagnostic[];
       const missingTranslationsWarning = diagnostics.find(
@@ -997,9 +989,9 @@ suite('DiagnosticService Tests', () => {
       await (diagnosticService as any).updateFileDiagnostics(documentStub);
 
       const setCall = diagnosticCollectionStub.set.getCall(0);
-      const entries = setCall.args[0] as readonly [
+      const entries = setCall.args[0] as [
         vscode.Uri,
-        readonly vscode.Diagnostic[] | undefined
+        vscode.Diagnostic[] | undefined
       ][];
       const diagnostics = entries[0][1] as vscode.Diagnostic[];
 
@@ -1075,9 +1067,9 @@ suite('DiagnosticService Tests', () => {
       await (diagnosticService as any).updateFileDiagnostics(documentStub);
 
       const setCall = diagnosticCollectionStub.set.getCall(0);
-      const entries = setCall.args[0] as readonly [
+      const entries = setCall.args[0] as [
         vscode.Uri,
-        readonly vscode.Diagnostic[] | undefined
+        vscode.Diagnostic[] | undefined
       ][];
       const diagnostics = entries[0][1] as vscode.Diagnostic[];
 
@@ -1091,6 +1083,469 @@ suite('DiagnosticService Tests', () => {
 
       // Restore stub
       findOpeningBraceRangeStub.restore();
+    });
+  });
+
+  suite('Internal Methods', () => {
+    test('getAllKeys should extract keys correctly', () => {
+      const input = {
+        simple: 'Simple value',
+        nested: {
+          key1: 'Value 1',
+          key2: 'Value 2',
+          deeper: {
+            key3: 'Value 3'
+          }
+        },
+        array: [1, 2, 3]
+      };
+
+      const result = (diagnosticService as any).getAllKeys(input);
+
+      // The array elements are also included as keys in the form array.0, array.1, etc.
+      const expected = [
+        'array',
+        'array.0',
+        'array.1',
+        'array.2',
+        'nested',
+        'nested.deeper',
+        'nested.deeper.key3',
+        'nested.key1',
+        'nested.key2',
+        'simple'
+      ].sort((a: string, b: string) => a.localeCompare(b));
+
+      assert.deepStrictEqual(
+        result.sort((a: string, b: string) => a.localeCompare(b)),
+        expected
+      );
+    });
+
+    test('traverseObject should extract keys correctly', () => {
+      const input = {
+        simple: 'Simple value',
+        nested: {
+          key1: 'Value 1',
+          key2: 'Value 2'
+        }
+      };
+
+      const keys: string[] = [];
+      (diagnosticService as any).traverseObject(input, '', keys);
+
+      const sortedKeys = [...keys].sort((a: string, b: string) =>
+        a.localeCompare(b)
+      );
+      const expectedKeys = [
+        'simple',
+        'nested',
+        'nested.key1',
+        'nested.key2'
+      ].sort((a: string, b: string) => a.localeCompare(b));
+      assert.deepStrictEqual(sortedKeys, expectedKeys);
+    });
+
+    test('extractParentKeys should extract parent keys correctly', () => {
+      const keys = [
+        'HomePage.title',
+        'HomePage.subtitle',
+        'Footer.copyright',
+        'simple'
+      ];
+
+      const result = (diagnosticService as any).extractParentKeys(keys);
+
+      assert.deepStrictEqual(
+        result.sort((a: string, b: string) => a.localeCompare(b)),
+        ['HomePage', 'Footer', 'simple'].sort((a: string, b: string) =>
+          a.localeCompare(b)
+        )
+      );
+    });
+
+    test('groupKeysByParent should group keys by parent', () => {
+      const keys = [
+        'HomePage.title',
+        'HomePage.subtitle',
+        'Footer.copyright',
+        'simple'
+      ];
+
+      const result = (diagnosticService as any).groupKeysByParent(keys);
+
+      assert(result.has('HomePage'));
+      assert(result.has('Footer'));
+      assert(!result.has('simple')); // Top-level keys aren't included
+
+      const homePageKeys = result.get('HomePage');
+      assert(homePageKeys?.has('HomePage.title'));
+      assert(homePageKeys?.has('HomePage.subtitle'));
+
+      const footerKeys = result.get('Footer');
+      assert(footerKeys?.has('Footer.copyright'));
+    });
+
+    test('compareNestedKeys should identify missing nested keys', () => {
+      const otherKeys = [
+        'HomePage.title',
+        'HomePage.subtitle',
+        'HomePage.description',
+        'Footer.copyright'
+      ];
+      const currentKeys = [
+        'HomePage.title',
+        'HomePage.subtitle',
+        'Footer.copyright',
+        'Footer.links'
+      ];
+      const locale = 'es';
+      const missingNestedKeysByParent = new Map();
+
+      (diagnosticService as any).compareNestedKeys(
+        otherKeys,
+        currentKeys,
+        locale,
+        missingNestedKeysByParent
+      );
+
+      assert(missingNestedKeysByParent.has('HomePage'));
+      const missingInHomePage = missingNestedKeysByParent
+        .get('HomePage')
+        .get('es');
+      assert(missingInHomePage.has('HomePage.description'));
+
+      assert(!missingNestedKeysByParent.has('Footer'));
+    });
+
+    test('compareParentKeys should identify missing parent keys', () => {
+      const otherKeys = ['HomePage.title', 'Footer.copyright', 'Header.logo'];
+      const currentKeys = ['HomePage.title', 'Footer.copyright'];
+      const locale = 'es';
+      const missingParentKeys = new Map();
+
+      (diagnosticService as any).compareParentKeys(
+        otherKeys,
+        currentKeys,
+        locale,
+        missingParentKeys
+      );
+
+      assert(missingParentKeys.has('Header'));
+      const locales = missingParentKeys.get('Header');
+      assert(locales.has('es'));
+    });
+
+    test('recordMissingKey should record missing keys correctly', () => {
+      const missingTranslationsByKey = new Map();
+
+      // Test regular translation key
+      (diagnosticService as any).recordMissingKey(
+        'welcome',
+        'es',
+        missingTranslationsByKey,
+        false
+      );
+
+      assert(missingTranslationsByKey.has('welcome'));
+      assert(missingTranslationsByKey.get('welcome').has('es'));
+
+      // Test parent key
+      (diagnosticService as any).recordMissingKey(
+        'HomePage',
+        'fr',
+        missingTranslationsByKey,
+        true
+      );
+
+      assert(missingTranslationsByKey.has('__PARENT__HomePage'));
+      assert(missingTranslationsByKey.get('__PARENT__HomePage').has('fr'));
+    });
+  });
+
+  suite('Diagnostic Methods', () => {
+    test('addDiagnosticsForNestedKeys should add diagnostics for missing nested keys', () => {
+      const missingNestedKeysByParent = new Map();
+      const esKeys = new Set(['HomePage.description']);
+      const frKeys = new Set(['HomePage.welcome']);
+
+      const localeMap = new Map();
+      localeMap.set('es', esKeys);
+      localeMap.set('fr', frKeys);
+
+      missingNestedKeysByParent.set('HomePage', localeMap);
+
+      const diagnostics: vscode.Diagnostic[] = [];
+      const keyRange = new vscode.Range(
+        new vscode.Position(1, 5),
+        new vscode.Position(1, 15)
+      );
+
+      const findKeyRangeStub = sinon
+        .stub(diagnosticService as any, 'findKeyRange')
+        .returns(keyRange);
+
+      const createMessageStub = sinon
+        .stub(diagnosticService as any, 'createMissingNestedKeysMessage')
+        .returns('Test message');
+
+      (diagnosticService as any).addDiagnosticsForNestedKeys(
+        documentStub,
+        missingNestedKeysByParent,
+        diagnostics
+      );
+
+      assert.strictEqual(diagnostics.length, 1);
+      assert.strictEqual(diagnostics[0].message, 'Test message');
+      assert.strictEqual(
+        diagnostics[0].severity,
+        vscode.DiagnosticSeverity.Warning
+      );
+
+      findKeyRangeStub.restore();
+      createMessageStub.restore();
+    });
+
+    test('addDiagnosticsForMissingTranslations should add diagnostics for missing translations', () => {
+      const missingTranslationsByKey = new Map();
+      const regularLocales = new Set(['es', 'fr']);
+      const parentLocales = new Set(['de']);
+
+      missingTranslationsByKey.set('welcome', regularLocales);
+      missingTranslationsByKey.set('__PARENT__HomePage', parentLocales);
+
+      const diagnostics: vscode.Diagnostic[] = [];
+      const keyRange = new vscode.Range(
+        new vscode.Position(1, 5),
+        new vscode.Position(1, 15)
+      );
+
+      const findKeyRangeStub = sinon
+        .stub(diagnosticService as any, 'findKeyRange')
+        .returns(keyRange);
+
+      const createMissingTranslationMessageStub = sinon
+        .stub(diagnosticService as any, 'createMissingTranslationMessage')
+        .returns('Missing translation message');
+
+      const createMissingParentKeyMessageStub = sinon
+        .stub(diagnosticService as any, 'createMissingParentKeyMessage')
+        .returns('Missing parent key message');
+
+      (diagnosticService as any).addDiagnosticsForMissingTranslations(
+        documentStub,
+        missingTranslationsByKey,
+        diagnostics
+      );
+
+      assert.strictEqual(diagnostics.length, 2);
+
+      findKeyRangeStub.restore();
+      createMissingTranslationMessageStub.restore();
+      createMissingParentKeyMessageStub.restore();
+    });
+
+    test('addDiagnosticsForMissingParentTranslations should add diagnostics for missing parent translations', () => {
+      const currentKeys = [
+        'HomePage.title',
+        'Footer.copyright.text' // Missing intermediate 'Footer.copyright' key
+      ];
+
+      const diagnostics: vscode.Diagnostic[] = [];
+      const keyRange = new vscode.Range(
+        new vscode.Position(1, 5),
+        new vscode.Position(1, 15)
+      );
+
+      const findKeyRangeStub = sinon
+        .stub(diagnosticService as any, 'findKeyRange')
+        .returns(keyRange);
+
+      (diagnosticService as any).addDiagnosticsForMissingParentTranslations(
+        documentStub,
+        currentKeys,
+        diagnostics
+      );
+
+      assert.strictEqual(diagnostics.length, 1);
+      assert(diagnostics[0].message.includes('Missing parent translation'));
+
+      findKeyRangeStub.restore();
+    });
+
+    test('addDiagnosticsForMissingParentKeys should add diagnostics for missing parent keys', () => {
+      const missingParentKeys = new Map();
+      missingParentKeys.set('Header', new Set(['es', 'fr']));
+
+      const diagnostics: vscode.Diagnostic[] = [];
+      const braceRange = new vscode.Range(
+        new vscode.Position(0, 0),
+        new vscode.Position(0, 1)
+      );
+
+      const findOpeningBraceRangeStub = sinon
+        .stub(diagnosticService as any, 'findOpeningBraceRange')
+        .returns(braceRange);
+
+      const createMessageStub = sinon
+        .stub(diagnosticService as any, 'createMissingParentKeysMessage')
+        .returns('Test message');
+
+      (diagnosticService as any).addDiagnosticsForMissingParentKeys(
+        documentStub,
+        missingParentKeys,
+        diagnostics
+      );
+
+      assert.strictEqual(diagnostics.length, 1);
+      assert.strictEqual(diagnostics[0].message, 'Test message');
+
+      findOpeningBraceRangeStub.restore();
+      createMessageStub.restore();
+    });
+
+    test('compareTranslationKeys should analyze all translation differences', async () => {
+      const translation = {
+        locale: 'es',
+        messages: new Map([
+          ['HomePage.title', '¡Hola mundo!'],
+          ['Header.logo', 'Logo'],
+          ['simple', 'Simple']
+        ])
+      };
+
+      const currentKeys = ['HomePage.title', 'Footer.copyright', 'simple'];
+
+      const document = documentStub;
+      const missingNestedKeysByParent = new Map();
+      const missingParentKeys = new Map();
+
+      // Setup config service stubs
+      const mockConfig = {
+        locales: ['en', 'es', 'fr'],
+        defaultLocale: 'en',
+        messagesPath: 'messages/${locale}.json',
+        requestPath: '/test/workspace/i18n/request.ts'
+      };
+      const mockMessageConfig = {
+        namespaces: ['common'],
+        defaultNamespace: 'common',
+        loadPath: 'messages/${locale}.json',
+        dynamicImport: false
+      };
+
+      configServiceStub.getNextIntlConfig.resolves(mockConfig);
+      configServiceStub.getMessageConfig.returns(mockMessageConfig);
+
+      // Setup file system stub
+      const esContent = {
+        HomePage: {title: '¡Hola mundo!'},
+        Header: {logo: 'Logo'},
+        simple: 'Simple'
+      };
+
+      const readFileStub = sinon
+        .stub(vscode.workspace.fs, 'readFile')
+        .resolves(Buffer.from(JSON.stringify(esContent)));
+
+      // Setup compareNestedKeys and compareParentKeys stubs
+      const compareNestedKeysStub = sinon.stub(
+        diagnosticService as any,
+        'compareNestedKeys'
+      );
+      const compareParentKeysStub = sinon.stub(
+        diagnosticService as any,
+        'compareParentKeys'
+      );
+
+      await (diagnosticService as any).compareTranslationKeys(
+        translation,
+        currentKeys,
+        document,
+        missingNestedKeysByParent,
+        missingParentKeys
+      );
+
+      // Verify the correct methods were called with expected arguments
+      assert(readFileStub.calledOnce);
+      assert(compareNestedKeysStub.calledOnce);
+      assert(compareParentKeysStub.calledOnce);
+
+      // Verify the args to the compare methods
+      const nestedKeysArgs = compareNestedKeysStub.getCall(0).args;
+      assert.deepStrictEqual(nestedKeysArgs[0], [
+        'HomePage.title',
+        'Header.logo',
+        'simple'
+      ]);
+      assert.deepStrictEqual(nestedKeysArgs[1], currentKeys);
+      assert.strictEqual(nestedKeysArgs[2], 'es');
+      assert.strictEqual(nestedKeysArgs[3], missingNestedKeysByParent);
+
+      const parentKeysArgs = compareParentKeysStub.getCall(0).args;
+      assert.deepStrictEqual(parentKeysArgs[0], [
+        'HomePage.title',
+        'Header.logo',
+        'simple'
+      ]);
+      assert.deepStrictEqual(parentKeysArgs[1], currentKeys);
+      assert.strictEqual(parentKeysArgs[2], 'es');
+      assert.strictEqual(parentKeysArgs[3], missingParentKeys);
+
+      readFileStub.restore();
+      compareNestedKeysStub.restore();
+      compareParentKeysStub.restore();
+    });
+
+    test('compareTranslationKeys should handle file reading errors', async () => {
+      const translation = {
+        locale: 'fr',
+        messages: new Map([['HomePage.title', 'Bonjour le monde!']])
+      };
+
+      const currentKeys = ['HomePage.title'];
+      const document = documentStub;
+      const missingNestedKeysByParent = new Map();
+      const missingParentKeys = new Map();
+
+      // Setup config service stubs
+      const mockConfig = {
+        locales: ['en', 'fr'],
+        defaultLocale: 'en',
+        messagesPath: 'messages/${locale}.json',
+        requestPath: '/test/workspace/i18n/request.ts'
+      };
+      const mockMessageConfig = {
+        namespaces: ['common'],
+        defaultNamespace: 'common',
+        loadPath: 'messages/${locale}.json',
+        dynamicImport: false
+      };
+
+      configServiceStub.getNextIntlConfig.resolves(mockConfig);
+      configServiceStub.getMessageConfig.returns(mockMessageConfig);
+
+      // Setup file system stub to throw an error
+      const readFileStub = sinon
+        .stub(vscode.workspace.fs, 'readFile')
+        .rejects(new Error('File not found'));
+
+      await (diagnosticService as any).compareTranslationKeys(
+        translation,
+        currentKeys,
+        document,
+        missingNestedKeysByParent,
+        missingParentKeys
+      );
+
+      // Verify error was logged
+      assert(
+        loggerStub.log.calledWith(
+          sinon.match('Error comparing translation keys:')
+        )
+      );
+
+      readFileStub.restore();
     });
   });
 });
