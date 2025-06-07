@@ -3,7 +3,8 @@ import tsParser from '@typescript-eslint/parser';
 
 export default [
   {
-    files: ['**/*.ts']
+    files: ['**/*.ts'],
+    ignores: ['**/test-scenario-file/**', '**/test-scenario-namespace/**']
   },
   {
     plugins: {

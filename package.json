@@ -10,7 +10,7 @@
     "url": "https://github.com/felipestanzani/next-intl-hlpr.git"
   },
   "engines": {
-    "vscode": "^1.79.0"
+    "vscode": "^1.100.0"
   },
   "categories": [
     "Linters",

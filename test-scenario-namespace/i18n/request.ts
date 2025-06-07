@@ -12,7 +12,7 @@ export default getRequestConfig(async ({requestLocale}) => {
     locale,
     messages: {
       pages,
-      validations
+      validation: validations
     }
   };
 });
