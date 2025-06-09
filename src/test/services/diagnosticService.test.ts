@@ -6,6 +6,7 @@ import {TranslationService} from '../../services/translationService';
 import {ConfigService} from '../../services/configService';
 import {Logger} from '../../utils/logger';
 import * as jsonc from 'jsonc-parser';
+import {TranslationComparisonUtils} from '../../utils/translationComparisonUtils';
 
 suite('DiagnosticService Tests', () => {
   let diagnosticService: DiagnosticService;
@@ -1088,155 +1089,6 @@ suite('DiagnosticService Tests', () => {
   });
 
   suite('Internal Methods', () => {
-    test('getAllKeys should extract keys correctly', () => {
-      const input = {
-        simple: 'Simple value',
-        nested: {
-          key1: 'Value 1',
-          key2: 'Value 2',
-          deeper: {
-            key3: 'Value 3'
-          }
-        },
-        array: [1, 2, 3]
-      };
-
-      const result = (diagnosticService as any).getAllKeys(input);
-
-      // The array elements are also included as keys in the form array.0, array.1, etc.
-      const expected = [
-        'array',
-        'array.0',
-        'array.1',
-        'array.2',
-        'nested',
-        'nested.deeper',
-        'nested.deeper.key3',
-        'nested.key1',
-        'nested.key2',
-        'simple'
-      ].sort((a: string, b: string) => a.localeCompare(b));
-
-      assert.deepStrictEqual(
-        result.sort((a: string, b: string) => a.localeCompare(b)),
-        expected
-      );
-    });
-
-    test('traverseObject should extract keys correctly', () => {
-      const input = {
-        simple: 'Simple value',
-        nested: {
-          key1: 'Value 1',
-          key2: 'Value 2'
-        }
-      };
-
-      const keys: string[] = [];
-      (diagnosticService as any).traverseObject(input, '', keys);
-
-      const sortedKeys = [...keys].sort((a: string, b: string) =>
-        a.localeCompare(b)
-      );
-      const expectedKeys = [
-        'simple',
-        'nested',
-        'nested.key1',
-        'nested.key2'
-      ].sort((a: string, b: string) => a.localeCompare(b));
-      assert.deepStrictEqual(sortedKeys, expectedKeys);
-    });
-
-    test('extractParentKeys should extract parent keys correctly', () => {
-      const keys = [
-        'HomePage.title',
-        'HomePage.subtitle',
-        'Footer.copyright',
-        'simple'
-      ];
-
-      const result = (diagnosticService as any).extractParentKeys(keys);
-
-      assert.deepStrictEqual(
-        result.sort((a: string, b: string) => a.localeCompare(b)),
-        ['HomePage', 'Footer', 'simple'].sort((a: string, b: string) =>
-          a.localeCompare(b)
-        )
-      );
-    });
-
-    test('groupKeysByParent should group keys by parent', () => {
-      const keys = [
-        'HomePage.title',
-        'HomePage.subtitle',
-        'Footer.copyright',
-        'simple'
-      ];
-
-      const result = (diagnosticService as any).groupKeysByParent(keys);
-
-      assert(result.has('HomePage'));
-      assert(result.has('Footer'));
-      assert(!result.has('simple')); // Top-level keys aren't included
-
-      const homePageKeys = result.get('HomePage');
-      assert(homePageKeys?.has('HomePage.title'));
-      assert(homePageKeys?.has('HomePage.subtitle'));
-
-      const footerKeys = result.get('Footer');
-      assert(footerKeys?.has('Footer.copyright'));
-    });
-
-    test('compareNestedKeys should identify missing nested keys', () => {
-      const otherKeys = [
-        'HomePage.title',
-        'HomePage.subtitle',
-        'HomePage.description',
-        'Footer.copyright'
-      ];
-      const currentKeys = [
-        'HomePage.title',
-        'HomePage.subtitle',
-        'Footer.copyright',
-        'Footer.links'
-      ];
-      const locale = 'es';
-      const missingNestedKeysByParent = new Map();
-
-      (diagnosticService as any).compareNestedKeys(
-        otherKeys,
-        currentKeys,
-        locale,
-        missingNestedKeysByParent
-      );
-
-      assert(missingNestedKeysByParent.has('HomePage'));
-      const missingInHomePage = missingNestedKeysByParent
-        .get('HomePage')
-        .get('es');
-      assert(missingInHomePage.has('HomePage.description'));
-
-      assert(!missingNestedKeysByParent.has('Footer'));
-    });
-
-    test('compareParentKeys should identify missing parent keys', () => {
-      const otherKeys = ['HomePage.title', 'Footer.copyright', 'Header.logo'];
-      const currentKeys = ['HomePage.title', 'Footer.copyright'];
-      const locale = 'es';
-      const missingParentKeys = new Map();
-
-      (diagnosticService as any).compareParentKeys(
-        otherKeys,
-        currentKeys,
-        locale,
-        missingParentKeys
-      );
-
-      assert(missingParentKeys.has('Header'));
-      const locales = missingParentKeys.get('Header');
-      assert(locales.has('es'));
-    });
-
     test('recordMissingKey should record missing keys correctly', () => {
       const missingTranslationsByKey = new Map();
 
@@ -1418,8 +1270,11 @@ suite('DiagnosticService Tests', () => {
       const currentKeys = ['HomePage.title', 'Footer.copyright', 'simple'];
 
       const document = documentStub;
-      const missingNestedKeysByParent = new Map();
-      const missingParentKeys = new Map();
+      const diagnosticInfo = {
+        missingNestedKeysByParent: new Map(),
+        missingTranslationsByKey: new Map(),
+        missingParentKeys: new Map()
+      };
 
       // Setup config service stubs
       const mockConfig = {
@@ -1449,13 +1304,16 @@ suite('DiagnosticService Tests', () => {
         .stub(vscode.workspace.fs, 'readFile')
         .resolves(Buffer.from(JSON.stringify(esContent)));
 
-      // Setup compareNestedKeys and compareParentKeys stubs
+      // Setup TranslationComparisonUtils stubs
+      const getAllKeysStub = sinon
+        .stub(TranslationComparisonUtils, 'getAllKeys')
+        .returns(['HomePage.title', 'Header.logo', 'simple']);
       const compareNestedKeysStub = sinon.stub(
-        diagnosticService as any,
+        TranslationComparisonUtils,
         'compareNestedKeys'
       );
       const compareParentKeysStub = sinon.stub(
-        diagnosticService as any,
+        TranslationComparisonUtils,
         'compareParentKeys'
       );
 
@@ -1463,12 +1321,12 @@ suite('DiagnosticService Tests', () => {
         translation,
         currentKeys,
         document,
-        missingNestedKeysByParent,
-        missingParentKeys
+        diagnosticInfo
       );
 
       // Verify the correct methods were called with expected arguments
       assert(readFileStub.calledOnce);
+      assert(getAllKeysStub.calledOnce);
       assert(compareNestedKeysStub.calledOnce);
       assert(compareParentKeysStub.calledOnce);
 
@@ -1481,7 +1339,10 @@ suite('DiagnosticService Tests', () => {
       ]);
       assert.deepStrictEqual(nestedKeysArgs[1], currentKeys);
       assert.strictEqual(nestedKeysArgs[2], 'es');
-      assert.strictEqual(nestedKeysArgs[3], missingNestedKeysByParent);
+      assert.strictEqual(
+        nestedKeysArgs[3],
+        diagnosticInfo.missingNestedKeysByParent
+      );
 
       const parentKeysArgs = compareParentKeysStub.getCall(0).args;
       assert.deepStrictEqual(parentKeysArgs[0], [
@@ -1491,9 +1352,10 @@ suite('DiagnosticService Tests', () => {
       ]);
       assert.deepStrictEqual(parentKeysArgs[1], currentKeys);
       assert.strictEqual(parentKeysArgs[2], 'es');
-      assert.strictEqual(parentKeysArgs[3], missingParentKeys);
+      assert.strictEqual(parentKeysArgs[3], diagnosticInfo.missingParentKeys);
 
       readFileStub.restore();
+      getAllKeysStub.restore();
       compareNestedKeysStub.restore();
       compareParentKeysStub.restore();
     });
@@ -1506,8 +1368,11 @@ suite('DiagnosticService Tests', () => {
 
       const currentKeys = ['HomePage.title'];
       const document = documentStub;
-      const missingNestedKeysByParent = new Map();
-      const missingParentKeys = new Map();
+      const diagnosticInfo = {
+        missingNestedKeysByParent: new Map(),
+        missingTranslationsByKey: new Map(),
+        missingParentKeys: new Map()
+      };
 
       // Setup config service stubs
       const mockConfig = {
@@ -1535,8 +1400,7 @@ suite('DiagnosticService Tests', () => {
         translation,
         currentKeys,
         document,
-        missingNestedKeysByParent,
-        missingParentKeys
+        diagnosticInfo
       );
 
       // Verify error was logged
