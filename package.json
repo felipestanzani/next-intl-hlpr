@@ -48,16 +48,16 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
-    "compile": "tsc -p ./",
-    "build": "tsc -p ./",
-    "watch": "tsc -watch -p ./",
+    "vscode:prepublish": "node esbuild.js --production",
+    "compile": "node esbuild.js",
+    "build": "node esbuild.js",
+    "watch": "node esbuild.js --watch",
     "lint": "eslint src --ext ts",
     "test": "vscode-test",
     "test:unit": "mocha \"out/test/utils/*.test.js\" \"out/test/simple.test.js\" \"out/test/demo.test.js\" --require ./test-setup.js --ui bdd",
     "test:diagnostics": "mocha \"out/test/services/diagnosticService.test.js\" --require ./test-setup.js --ui bdd",
     "test:coverage": "nyc npm run test:unit",
-    "pretest": "npm run compile && npm run lint",
+    "pretest": "tsc -p ./ && npm run lint",
     "test:watch": "npm run compile && npm run test:unit -- --watch"
   },
   "devDependencies": {
@@ -70,7 +70,9 @@
     "@typescript-eslint/parser": "^8.32.1",
     "@vscode/test-cli": "^0.0.8",
     "@vscode/test-electron": "^2.3.9",
+    "esbuild": "^0.20.2",
     "eslint": "^9.26.0",
+    "jsonc-parser": "^3.3.1",
     "mocha": "^10.2.0",
     "nyc": "^15.1.0",
     "prettier": "3.5.3",
@@ -81,8 +83,7 @@
     "@formatjs/fast-memoize": "^2.2.7",
     "@schummar/icu-type-parser": "1.22.2",
     "eslint-config-molindo": "^8.0.0",
-    "intl-messageformat": "^10.7.16",
-    "jsonc-parser": "^3.3.1"
+    "intl-messageformat": "^10.7.16"
   },
   "prettier": "eslint-config-molindo/.prettierrc.json"
 }
