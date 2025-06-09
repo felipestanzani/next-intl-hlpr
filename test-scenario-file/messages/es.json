@@ -4,6 +4,7 @@
         "description": "Esta es una página de prueba",
         "about": "Ir a la página acerca de"
     },
+    "Body": {},
     "Header": {
         "title": "Mi aplicación web"
     }

@@ -457,12 +457,6 @@ export class DiagnosticService {
       diagnostics
     );
 
-    this.addDiagnosticsForMissingParentTranslations(
-      document,
-      currentKeys,
-      diagnostics
-    );
-
     this.addDiagnosticsForMissingParentKeys(
       document,
       diagnosticInfo.missingParentKeys,
@@ -528,34 +522,6 @@ export class DiagnosticService {
   }
 
   /**
-   * Adds diagnostics for missing parent translations
-   */
-  private addDiagnosticsForMissingParentTranslations(
-    document: vscode.TextDocument,
-    currentKeys: string[],
-    diagnostics: vscode.Diagnostic[]
-  ): void {
-    for (const key of currentKeys) {
-      const keyParts = key.split('.');
-      if (keyParts.length > 1) {
-        const parentKey = keyParts.slice(0, -1).join('.');
-        if (!currentKeys.includes(parentKey)) {
-          const range = this.findKeyRange(document, key);
-          if (range) {
-            diagnostics.push(
-              this.createMissingParentTranslationDiagnostic(
-                range,
-                key,
-                parentKey
-              )
-            );
-          }
-        }
-      }
-    }
-  }
-
-  /**
    * Adds diagnostics for missing parent keys
    */
   private addDiagnosticsForMissingParentKeys(
@@ -613,18 +579,6 @@ export class DiagnosticService {
     }
 
     return keys;
-  }
-
-  /**
-   * Creates a diagnostic for missing parent translation
-   */
-  private createMissingParentTranslationDiagnostic(
-    range: vscode.Range,
-    key: string,
-    parentKey: string
-  ): vscode.Diagnostic {
-    const message = `Missing parent translation "${parentKey}" for key "${key}"`;
-    return this.createDiagnostic(range, message);
   }
 
   /**
@@ -710,38 +664,6 @@ export class DiagnosticService {
     });
 
     return foundRange;
-  }
-
-  /**
-   * Finds a simple (non-nested) key in a document
-   * @deprecated Use findKeyRange instead
-   */
-  private findSimpleKeyRange(
-    document: vscode.TextDocument,
-    text: string,
-    key: string
-  ): vscode.Range | undefined {
-    const keyPattern = new RegExp(`"${key}"\\s*:`, 'g');
-    const match = keyPattern.exec(text);
-    if (!match) {
-      return undefined;
-    }
-
-    const startPos = document.positionAt(match.index);
-    const endPos = document.positionAt(match.index + match[0].length);
-    return new vscode.Range(startPos, endPos);
-  }
-
-  /**
-   * Finds a nested key in text by traversing through each part
-   * @deprecated Use findKeyRange instead
-   */
-  private findNestedKeyInText(
-    document: vscode.TextDocument,
-    text: string,
-    keyParts: string[]
-  ): vscode.Range | undefined {
-    return this.findKeyRange(document, keyParts.join('.'));
   }
 
   /**
