@@ -7,6 +7,7 @@ import {ConfigService} from '../../services/configService';
 import {Logger} from '../../utils/logger';
 import * as jsonc from 'jsonc-parser';
 import {TranslationComparisonUtils} from '../../utils/translationComparisonUtils';
+import {DiagnosticMessageFactory} from '../../utils/diagnosticMessageFactory';
 
 suite('DiagnosticService Tests', () => {
   let diagnosticService: DiagnosticService;
@@ -1177,13 +1178,9 @@ suite('DiagnosticService Tests', () => {
         .stub(diagnosticService as any, 'findKeyRange')
         .returns(keyRange);
 
-      const createMissingTranslationMessageStub = sinon
-        .stub(diagnosticService as any, 'createMissingTranslationMessage')
-        .returns('Missing translation message');
-
-      const createMissingParentKeyMessageStub = sinon
-        .stub(diagnosticService as any, 'createMissingParentKeyMessage')
-        .returns('Missing parent key message');
+      const createMessageStub = sinon
+        .stub(DiagnosticMessageFactory, 'createMessage')
+        .returns('Test diagnostic message');
 
       (diagnosticService as any).addDiagnosticsForMissingTranslations(
         documentStub,
@@ -1192,10 +1189,10 @@ suite('DiagnosticService Tests', () => {
       );
 
       assert.strictEqual(diagnostics.length, 2);
+      assert(createMessageStub.calledTwice);
 
       findKeyRangeStub.restore();
-      createMissingTranslationMessageStub.restore();
-      createMissingParentKeyMessageStub.restore();
+      createMessageStub.restore();
     });
 
     test('addDiagnosticsForMissingParentTranslations should add diagnostics for missing parent translations', () => {
@@ -1241,7 +1238,7 @@ suite('DiagnosticService Tests', () => {
         .returns(braceRange);
 
       const createMessageStub = sinon
-        .stub(diagnosticService as any, 'createMissingParentKeysMessage')
+        .stub(DiagnosticMessageFactory, 'createMessage')
         .returns('Test message');
 
       (diagnosticService as any).addDiagnosticsForMissingParentKeys(
@@ -1252,6 +1249,13 @@ suite('DiagnosticService Tests', () => {
 
       assert.strictEqual(diagnostics.length, 1);
       assert.strictEqual(diagnostics[0].message, 'Test message');
+      assert(createMessageStub.calledOnce);
+      assert(
+        createMessageStub.calledWith(
+          DiagnosticMessageFactory.MessageType.MISSING_PARENT_KEYS,
+          missingParentKeys
+        )
+      );
 
       findOpeningBraceRangeStub.restore();
       createMessageStub.restore();

@@ -11,6 +11,7 @@ import {
   MissingTranslation
 } from '../interfaces/diagnostics';
 import {TranslationComparisonUtils} from '../utils/translationComparisonUtils';
+import {DiagnosticMessageFactory} from '../utils/diagnosticMessageFactory';
 
 export class DiagnosticService {
   private readonly diagnosticCollection: vscode.DiagnosticCollection;
@@ -404,10 +405,13 @@ export class DiagnosticService {
     for (const [parentKey, localeKeys] of missingNestedKeysByParent) {
       const range = this.findKeyRange(document, parentKey);
       if (range) {
-        const message = this.createMissingNestedKeysMessage({
-          parentKey,
-          localeKeys
-        });
+        const message = DiagnosticMessageFactory.createMessage(
+          DiagnosticMessageFactory.MessageType.MISSING_NESTED_KEYS,
+          {
+            parentKey,
+            localeKeys
+          }
+        );
         diagnostics.push(this.createDiagnostic(range, message));
       }
     }
@@ -427,9 +431,12 @@ export class DiagnosticService {
         const actualKey = key.replace('__PARENT__', '');
         const range = this.findKeyRange(document, actualKey);
         if (range) {
-          const message = this.createMissingParentKeyMessage(
-            actualKey,
-            missingLocales
+          const message = DiagnosticMessageFactory.createMessage(
+            DiagnosticMessageFactory.MessageType.MISSING_PARENT_KEY,
+            {
+              key: actualKey,
+              missingLocales
+            }
           );
           diagnostics.push(this.createDiagnostic(range, message));
         }
@@ -437,11 +444,14 @@ export class DiagnosticService {
         // Regular translation key
         const range = this.findKeyRange(document, key);
         if (range) {
-          const message = this.createMissingTranslationMessage({
-            key,
-            missingLocales,
-            isParentKey: false
-          });
+          const message = DiagnosticMessageFactory.createMessage(
+            DiagnosticMessageFactory.MessageType.MISSING_TRANSLATION,
+            {
+              key,
+              missingLocales,
+              isParentKey: false
+            }
+          );
           diagnostics.push(this.createDiagnostic(range, message));
         }
       }
@@ -463,7 +473,10 @@ export class DiagnosticService {
     // Find the opening brace of the JSON file using jsonc-parser
     const range = this.findOpeningBraceRange(document);
     if (range) {
-      const message = this.createMissingParentKeysMessage(missingParentKeys);
+      const message = DiagnosticMessageFactory.createMessage(
+        DiagnosticMessageFactory.MessageType.MISSING_PARENT_KEYS,
+        missingParentKeys
+      );
       diagnostics.push(this.createDiagnostic(range, message));
     }
   }
@@ -567,52 +580,6 @@ export class DiagnosticService {
     });
 
     return foundRange;
-  }
-
-  /**
-   * Creates a message for missing translation
-   */
-  private createMissingTranslationMessage(
-    missingTranslation: MissingTranslation
-  ): string {
-    return `Missing translations for key "${missingTranslation.key}" in:\n${Array.from(missingTranslation.missingLocales).join(', ')}`;
-  }
-
-  /**
-   * Creates a message for missing parent key
-   */
-  private createMissingParentKeyMessage(
-    key: string,
-    missingLocales: Set<string>
-  ): string {
-    return `Missing key "${key}" in:\n${Array.from(missingLocales).join(', ')}`;
-  }
-
-  /**
-   * Creates a message for missing nested keys
-   */
-  private createMissingNestedKeysMessage(
-    missingNestedKeys: MissingNestedKeys
-  ): string {
-    const lines = [`Missing translations in "${missingNestedKeys.parentKey}":`];
-    for (const [locale, keys] of missingNestedKeys.localeKeys) {
-      lines.push(`${locale} - ${Array.from(keys).join(', ')}`);
-    }
-    return lines.join('\n');
-  }
-
-  /**
-   * Creates a message for missing parent keys
-   */
-  private createMissingParentKeysMessage(
-    missingParentKeys: Map<string, Set<string>>
-  ): string {
-    const lines = ['Missing keys in this file:'];
-    for (const [parentKey, locales] of missingParentKeys) {
-      const localeList = Array.from(locales).join(', ');
-      lines.push(`- "${parentKey}" present in: ${localeList}`);
-    }
-    return lines.join('\n');
   }
 
   /**
