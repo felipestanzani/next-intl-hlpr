@@ -82,8 +82,25 @@ export class DiagnosticService {
    */
   private async handleFileChange(uri: vscode.Uri): Promise<void> {
     this.logger.log(`Translation file changed/created: ${uri.fsPath}`);
-    await this.translationService.reloadTranslations();
-    await this.updateDiagnostics(await vscode.workspace.openTextDocument(uri));
+
+    try {
+      const document = await vscode.workspace.openTextDocument(uri);
+
+      // Use jsonc-parser to validate the document
+      const rootNode = jsonc.parseTree(document.getText(), [], {
+        allowTrailingComma: true
+      });
+
+      if (!rootNode) {
+        this.logger.log(`Invalid JSON in file: ${uri.fsPath}`);
+        return;
+      }
+
+      await this.translationService.reloadTranslations();
+      await this.updateDiagnostics(document);
+    } catch (error) {
+      this.logger.log(`Error handling file change: ${error}`);
+    }
   }
 
   /**
@@ -174,6 +191,16 @@ export class DiagnosticService {
       return;
     }
 
+    // Parse the document using jsonc-parser with location information
+    const rootNode = jsonc.parseTree(document.getText(), [], {
+      allowTrailingComma: true
+    });
+    if (!rootNode) {
+      this.logger.log(`Failed to parse JSON document: ${document.uri.fsPath}`);
+      return;
+    }
+
+    // Get the content using standard parse
     const currentContent = jsonc.parse(document.getText(), [], {
       allowTrailingComma: true
     });
@@ -265,9 +292,12 @@ export class DiagnosticService {
         await vscode.workspace.fs.readFile(vscode.Uri.file(otherFilePath))
       ).toString();
 
+      // Use jsonc-parser instead of simple JSON parsing
       const otherContent = jsonc.parse(otherFileContent, [], {
         allowTrailingComma: true
       });
+
+      // Get all keys using improved getAllKeys method
       const otherKeys = this.getAllKeys(otherContent);
 
       // Compare nested keys
@@ -537,7 +567,7 @@ export class DiagnosticService {
       return;
     }
 
-    // Find the opening brace of the JSON file
+    // Find the opening brace of the JSON file using jsonc-parser
     const range = this.findOpeningBraceRange(document);
     if (range) {
       const message = this.createMissingParentKeysMessage(missingParentKeys);
@@ -566,26 +596,23 @@ export class DiagnosticService {
    */
   private getAllKeys(obj: any, prefix = ''): string[] {
     const keys: string[] = [];
-    this.traverseObject(obj, prefix, keys);
-    return keys;
-  }
-
-  /**
-   * Recursively traverses an object to extract all key paths
-   */
-  private traverseObject(obj: any, prefix = '', keys: string[] = []): void {
-    if (!obj || typeof obj !== 'object') {
-      return;
-    }
 
     for (const key in obj) {
-      const newKey = prefix ? `${prefix}.${key}` : key;
-      keys.push(newKey);
-
-      if (typeof obj[key] === 'object' && obj[key] !== null) {
-        this.traverseObject(obj[key], newKey, keys);
+      if (Object.hasOwn(obj, key)) {
+        const newPath = prefix ? `${prefix}.${key}` : key;
+        if (
+          typeof obj[key] === 'object' &&
+          obj[key] !== null &&
+          !Array.isArray(obj[key])
+        ) {
+          keys.push(...this.getAllKeys(obj[key], newPath));
+        } else {
+          keys.push(newPath);
+        }
       }
     }
+
+    return keys;
   }
 
   /**
@@ -618,18 +645,76 @@ export class DiagnosticService {
     key: string
   ): vscode.Range | undefined {
     const text = document.getText();
-    const keyParts = key.split('.');
-
-    if (keyParts.length === 1) {
-      return this.findSimpleKeyRange(document, text, keyParts[0]);
+    const rootNode = jsonc.parseTree(text, [], {allowTrailingComma: true});
+    if (!rootNode) {
+      return undefined;
     }
 
-    // For nested keys, try more complex search methods
-    return this.findNestedKeyRange(document, text, keyParts);
+    const keyParts = key.split('.');
+
+    let foundRange: vscode.Range | undefined;
+    jsonc.visit(text, {
+      onObjectProperty: (
+        property,
+        offset,
+        length,
+        startLine,
+        startCharacter
+      ) => {
+        if (foundRange) {
+          return;
+        }
+
+        const keyNode = jsonc.findNodeAtOffset(rootNode, offset);
+        if (!keyNode) {
+          return;
+        }
+
+        const nodePath = jsonc.getNodePath(keyNode);
+
+        // For top-level keys
+        if (
+          keyParts.length === 1 &&
+          nodePath.length === 1 &&
+          property === keyParts[0]
+        ) {
+          foundRange = new vscode.Range(
+            new vscode.Position(startLine, startCharacter),
+            new vscode.Position(startLine, startCharacter + length)
+          );
+          return;
+        }
+
+        // For nested keys
+        if (keyParts.length > 1 && property === keyParts[keyParts.length - 1]) {
+          // Check if the path matches
+          const pathMatches = nodePath.length === keyParts.length;
+          if (pathMatches) {
+            let matches = true;
+            for (let i = 0; i < nodePath.length; i++) {
+              if (nodePath[i] !== keyParts[i]) {
+                matches = false;
+                break;
+              }
+            }
+
+            if (matches) {
+              foundRange = new vscode.Range(
+                new vscode.Position(startLine, startCharacter),
+                new vscode.Position(startLine, startCharacter + length)
+              );
+            }
+          }
+        }
+      }
+    });
+
+    return foundRange;
   }
 
   /**
    * Finds a simple (non-nested) key in a document
+   * @deprecated Use findKeyRange instead
    */
   private findSimpleKeyRange(
     document: vscode.TextDocument,
@@ -648,86 +733,15 @@ export class DiagnosticService {
   }
 
   /**
-   * Finds a nested key in a document
-   */
-  private findNestedKeyRange(
-    document: vscode.TextDocument,
-    text: string,
-    keyParts: string[]
-  ): vscode.Range | undefined {
-    try {
-      const content = jsonc.parse(text, [], {allowTrailingComma: true});
-
-      // Check if the key exists in the parsed content
-      let currentObj = content;
-      for (let i = 0; i < keyParts.length - 1; i++) {
-        const part = keyParts[i];
-        if (!currentObj[part] || typeof currentObj[part] !== 'object') {
-          return undefined;
-        }
-        currentObj = currentObj[part];
-      }
-
-      const lastKey = keyParts[keyParts.length - 1];
-      if (!(lastKey in currentObj)) {
-        return undefined;
-      }
-
-      // Search for the key by looking for each part in sequence
-      return this.findNestedKeyInText(document, text, keyParts);
-    } catch (error) {
-      // Fallback to simple search if JSON parsing fails
-      this.logger.log(
-        'JSON parsing failed in findKeyRange, using fallback search',
-        error
-      );
-      return this.findSimpleKeyRange(
-        document,
-        text,
-        keyParts[keyParts.length - 1]
-      );
-    }
-  }
-
-  /**
    * Finds a nested key in text by traversing through each part
+   * @deprecated Use findKeyRange instead
    */
   private findNestedKeyInText(
     document: vscode.TextDocument,
     text: string,
     keyParts: string[]
   ): vscode.Range | undefined {
-    let searchStartIndex = 0;
-
-    // Navigate through each level of nesting
-    for (let i = 0; i < keyParts.length; i++) {
-      const currentKey = keyParts[i];
-      const keyPattern = new RegExp(`"${currentKey}"\\s*:`, 'g');
-      keyPattern.lastIndex = searchStartIndex;
-
-      const match = keyPattern.exec(text);
-      if (!match) {
-        return undefined;
-      }
-
-      // If this is the last key part, we found our target
-      if (i === keyParts.length - 1) {
-        return new vscode.Range(
-          document.positionAt(match.index),
-          document.positionAt(match.index + match[0].length)
-        );
-      }
-
-      // For intermediate keys, find the opening brace and continue searching from there
-      let braceIndex = text.indexOf('{', match.index + match[0].length);
-      if (braceIndex === -1) {
-        return undefined;
-      }
-
-      searchStartIndex = braceIndex + 1;
-    }
-
-    return undefined;
+    return this.findKeyRange(document, keyParts.join('.'));
   }
 
   /**
@@ -783,12 +797,13 @@ export class DiagnosticService {
     document: vscode.TextDocument
   ): vscode.Range | undefined {
     const text = document.getText();
-    const openingBraceIndex = text.indexOf('{');
-    if (openingBraceIndex === -1) {
+    const rootNode = jsonc.parseTree(text, [], {allowTrailingComma: true});
+    if (!rootNode || rootNode.type !== 'object') {
       return undefined;
     }
 
-    const position = document.positionAt(openingBraceIndex);
+    // Get the range for the opening brace
+    const position = document.positionAt(rootNode.offset);
     return new vscode.Range(position, position.translate(0, 1));
   }
 
