@@ -5,11 +5,7 @@ import {Logger} from '../utils/logger';
 import {TranslationService} from './translationService';
 import {ConfigService} from './configService';
 import {NextIntlConfig, MessageConfig} from '../interfaces/nextIntlConfig';
-import {
-  DiagnosticInfo,
-  MissingNestedKeys,
-  MissingTranslation
-} from '../interfaces/diagnostics';
+import {DiagnosticInfo} from '../interfaces/diagnostics';
 import {TranslationComparisonUtils} from '../utils/translationComparisonUtils';
 import {DiagnosticMessageFactory} from '../utils/diagnosticMessageFactory';
 
@@ -89,9 +85,7 @@ export class DiagnosticService {
       const document = await vscode.workspace.openTextDocument(uri);
 
       // Use jsonc-parser to validate the document
-      const rootNode = jsonc.parseTree(document.getText(), [], {
-        allowTrailingComma: true
-      });
+      const rootNode = this.parseJsoncDocument(document.getText());
 
       if (!rootNode) {
         this.logger.log(`Invalid JSON in file: ${uri.fsPath}`);
@@ -194,18 +188,14 @@ export class DiagnosticService {
     }
 
     // Parse the document using jsonc-parser with location information
-    const rootNode = jsonc.parseTree(document.getText(), [], {
-      allowTrailingComma: true
-    });
+    const rootNode = this.parseJsoncDocument(document.getText());
     if (!rootNode) {
       this.logger.log(`Failed to parse JSON document: ${document.uri.fsPath}`);
       return;
     }
 
     // Get the content using standard parse
-    const currentContent = jsonc.parse(document.getText(), [], {
-      allowTrailingComma: true
-    });
+    const currentContent = this.parseJsoncDocument(document.getText(), false);
     const currentKeys = TranslationComparisonUtils.getAllKeys(currentContent);
 
     const diagnosticInfo = await this.analyzeMissingTranslations(
@@ -295,9 +285,7 @@ export class DiagnosticService {
       ).toString();
 
       // Use jsonc-parser instead of simple JSON parsing
-      const otherContent = jsonc.parse(otherFileContent, [], {
-        allowTrailingComma: true
-      });
+      const otherContent = this.parseJsoncDocument(otherFileContent, false);
 
       // Get all keys using utility class
       const otherKeys = TranslationComparisonUtils.getAllKeys(otherContent);
@@ -403,17 +391,16 @@ export class DiagnosticService {
     diagnostics: vscode.Diagnostic[]
   ): void {
     for (const [parentKey, localeKeys] of missingNestedKeysByParent) {
-      const range = this.findKeyRange(document, parentKey);
-      if (range) {
-        const message = DiagnosticMessageFactory.createMessage(
-          DiagnosticMessageFactory.MessageType.MISSING_NESTED_KEYS,
-          {
-            parentKey,
-            localeKeys
-          }
-        );
-        diagnostics.push(this.createDiagnostic(range, message));
-      }
+      this.addDiagnostic(
+        document,
+        parentKey,
+        DiagnosticMessageFactory.MessageType.MISSING_NESTED_KEYS,
+        {
+          parentKey,
+          localeKeys
+        },
+        diagnostics
+      );
     }
   }
 
@@ -429,31 +416,29 @@ export class DiagnosticService {
       // Check if this is a parent key (marked with __PARENT__ prefix)
       if (key.startsWith('__PARENT__')) {
         const actualKey = key.replace('__PARENT__', '');
-        const range = this.findKeyRange(document, actualKey);
-        if (range) {
-          const message = DiagnosticMessageFactory.createMessage(
-            DiagnosticMessageFactory.MessageType.MISSING_PARENT_KEY,
-            {
-              key: actualKey,
-              missingLocales
-            }
-          );
-          diagnostics.push(this.createDiagnostic(range, message));
-        }
+        this.addDiagnostic(
+          document,
+          actualKey,
+          DiagnosticMessageFactory.MessageType.MISSING_PARENT_KEY,
+          {
+            key: actualKey,
+            missingLocales
+          },
+          diagnostics
+        );
       } else {
         // Regular translation key
-        const range = this.findKeyRange(document, key);
-        if (range) {
-          const message = DiagnosticMessageFactory.createMessage(
-            DiagnosticMessageFactory.MessageType.MISSING_TRANSLATION,
-            {
-              key,
-              missingLocales,
-              isParentKey: false
-            }
-          );
-          diagnostics.push(this.createDiagnostic(range, message));
-        }
+        this.addDiagnostic(
+          document,
+          key,
+          DiagnosticMessageFactory.MessageType.MISSING_TRANSLATION,
+          {
+            key,
+            missingLocales,
+            isParentKey: false
+          },
+          diagnostics
+        );
       }
     }
   }
@@ -515,7 +500,7 @@ export class DiagnosticService {
     key: string
   ): vscode.Range | undefined {
     const text = document.getText();
-    const rootNode = jsonc.parseTree(text, [], {allowTrailingComma: true});
+    const rootNode = this.parseJsoncDocument(text);
     if (!rootNode) {
       return undefined;
     }
@@ -548,10 +533,7 @@ export class DiagnosticService {
           nodePath.length === 1 &&
           property === keyParts[0]
         ) {
-          foundRange = new vscode.Range(
-            new vscode.Position(startLine, startCharacter),
-            new vscode.Position(startLine, startCharacter + length)
-          );
+          foundRange = this.createRange(startLine, startCharacter, length);
           return;
         }
 
@@ -569,10 +551,7 @@ export class DiagnosticService {
             }
 
             if (matches) {
-              foundRange = new vscode.Range(
-                new vscode.Position(startLine, startCharacter),
-                new vscode.Position(startLine, startCharacter + length)
-              );
+              foundRange = this.createRange(startLine, startCharacter, length);
             }
           }
         }
@@ -589,7 +568,7 @@ export class DiagnosticService {
     document: vscode.TextDocument
   ): vscode.Range | undefined {
     const text = document.getText();
-    const rootNode = jsonc.parseTree(text, [], {allowTrailingComma: true});
+    const rootNode = this.parseJsoncDocument(text);
     if (!rootNode || rootNode.type !== 'object') {
       return undefined;
     }
@@ -627,5 +606,55 @@ export class DiagnosticService {
     const loadPath = messageConfig.loadPath.replace('${locale}', locale);
     const basePath = path.dirname(path.dirname(config.requestPath));
     return path.join(basePath, loadPath);
+  }
+
+  /**
+   * Parses a JSON document using jsonc-parser
+   * @param text The document text to parse
+   * @param withLocationInfo Whether to include location information
+   * @returns The parsed document
+   */
+  private parseJsoncDocument(
+    text: string,
+    withLocationInfo: boolean = true
+  ): any {
+    const options = {allowTrailingComma: true};
+    return withLocationInfo
+      ? jsonc.parseTree(text, [], options)
+      : jsonc.parse(text, [], options);
+  }
+
+  /**
+   * Creates a Range object from start position and length
+   */
+  private createRange(
+    startLine: number,
+    startCharacter: number,
+    length: number
+  ): vscode.Range {
+    return new vscode.Range(
+      new vscode.Position(startLine, startCharacter),
+      new vscode.Position(startLine, startCharacter + length)
+    );
+  }
+
+  /**
+   * Adds a diagnostic for a key in a document
+   */
+  private addDiagnostic(
+    document: vscode.TextDocument,
+    key: string,
+    messageType: (typeof DiagnosticMessageFactory.MessageType)[keyof typeof DiagnosticMessageFactory.MessageType],
+    messageData: any,
+    diagnostics: vscode.Diagnostic[]
+  ): void {
+    const range = this.findKeyRange(document, key);
+    if (range) {
+      const message = DiagnosticMessageFactory.createMessage(
+        messageType,
+        messageData
+      );
+      diagnostics.push(this.createDiagnostic(range, message));
+    }
   }
 }

@@ -1,5 +1,3 @@
-import * as vscode from 'vscode';
-
 /**
  * Utility class for translation key comparison operations
  */

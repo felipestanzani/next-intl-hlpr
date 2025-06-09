@@ -5,7 +5,6 @@ import {DiagnosticService} from '../../services/diagnosticService';
 import {TranslationService} from '../../services/translationService';
 import {ConfigService} from '../../services/configService';
 import {Logger} from '../../utils/logger';
-import * as jsonc from 'jsonc-parser';
 import {TranslationComparisonUtils} from '../../utils/translationComparisonUtils';
 import {DiagnosticMessageFactory} from '../../utils/diagnosticMessageFactory';
 
