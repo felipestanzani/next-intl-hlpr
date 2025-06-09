@@ -3,6 +3,7 @@ import * as sinon from 'sinon';
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as jsonc from 'jsonc-parser';
 import {TranslationService} from '../../services/translationService';
 import {ConfigService} from '../../services/configService';
 import {Logger} from '../../utils/logger';

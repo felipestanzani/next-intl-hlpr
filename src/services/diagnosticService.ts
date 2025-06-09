@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as jsonc from 'jsonc-parser';
 import {Logger} from '../utils/logger';
 import {TranslationService} from './translationService';
 import {ConfigService} from './configService';
@@ -173,7 +174,9 @@ export class DiagnosticService {
       return;
     }
 
-    const currentContent = JSON.parse(document.getText());
+    const currentContent = jsonc.parse(document.getText(), [], {
+      allowTrailingComma: true
+    });
     const currentKeys = this.getAllKeys(currentContent);
 
     const diagnosticInfo = await this.analyzeMissingTranslations(
@@ -262,7 +265,9 @@ export class DiagnosticService {
         await vscode.workspace.fs.readFile(vscode.Uri.file(otherFilePath))
       ).toString();
 
-      const otherContent = JSON.parse(otherFileContent);
+      const otherContent = jsonc.parse(otherFileContent, [], {
+        allowTrailingComma: true
+      });
       const otherKeys = this.getAllKeys(otherContent);
 
       // Compare nested keys
@@ -651,7 +656,7 @@ export class DiagnosticService {
     keyParts: string[]
   ): vscode.Range | undefined {
     try {
-      const content = JSON.parse(text);
+      const content = jsonc.parse(text, [], {allowTrailingComma: true});
 
       // Check if the key exists in the parsed content
       let currentObj = content;

@@ -1,11 +1,15 @@
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import * as vscode from 'vscode';
-import {activate, deactivate} from '../extension';
-import {DiagnosticService} from '../services/diagnosticService';
-import {TranslationService} from '../services/translationService';
-import {ConfigService} from '../services/configService';
+import * as jsonc from 'jsonc-parser';
+
+// Mock modules
 import {Logger} from '../utils/logger';
+import {ConfigService} from '../services/configService';
+import {TranslationService} from '../services/translationService';
+import {DiagnosticService} from '../services/diagnosticService';
+import * as extension from '../extension';
+import {activate, deactivate} from '../extension';
 
 suite('Extension Tests', () => {
   let contextStub: sinon.SinonStubbedInstance<vscode.ExtensionContext>;

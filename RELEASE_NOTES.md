@@ -1,5 +1,16 @@
 # Release Notes
 
+## Version 0.0.5 (Unreleased)
+
+### Improvements
+
+- **Restored `jsonc-parser` Support**: Reintroduced the `jsonc-parser` library for handling JSON files with comments and trailing commas. This makes the extension more flexible when working with translation files that include developer comments or follow more relaxed JSON formatting.
+- **Enhanced JSON Parsing**: The extension now properly handles JSON files with comments, trailing commas, and other JSONC features, improving developer experience when maintaining translation files.
+
+### Known Limitations
+
+- The key position parser for diagnostics and hover has been improved with the jsonc-parser implementation.
+
 ## Version 0.0.4 (April 30, 2025)
 
 ### Bug Fixes

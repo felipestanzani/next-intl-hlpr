@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as jsonc from 'jsonc-parser';
 import {Logger} from '../utils/logger';
 import {ConfigService} from './configService';
 import {Translation, ITranslationService} from '../interfaces/translation';
@@ -71,7 +72,7 @@ export class TranslationService implements ITranslationService {
 
         if (fs.existsSync(filePath)) {
           const content = await fs.promises.readFile(filePath, 'utf8');
-          const messages = JSON.parse(content);
+          const messages = jsonc.parse(content, [], {allowTrailingComma: true});
           this.addMessagesToTranslation(translation, messages);
         } else {
           this.logger.log(`Translation file not found: ${filePath}`);
