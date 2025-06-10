@@ -209,8 +209,8 @@ export class DiagnosticService {
       return;
     }
 
-    // Get the content using standard parse
-    const currentContent = this.parseJsoncDocument(document.getText(), false);
+    // Extract content from the rootNode instead of parsing again
+    const currentContent = jsonc.getNodeValue(rootNode);
     const currentKeys = TranslationComparisonUtils.getAllKeys(currentContent);
 
     const diagnosticInfo = await this.analyzeMissingTranslations(
@@ -299,8 +299,9 @@ export class DiagnosticService {
         await vscode.workspace.fs.readFile(vscode.Uri.file(otherFilePath))
       ).toString();
 
-      // Use jsonc-parser instead of simple JSON parsing
-      const otherContent = this.parseJsoncDocument(otherFileContent, false);
+      // Parse once and extract value
+      const otherRootNode = this.parseJsoncDocument(otherFileContent);
+      const otherContent = jsonc.getNodeValue(otherRootNode);
 
       // Get all keys using utility class
       const otherKeys = TranslationComparisonUtils.getAllKeys(otherContent);
@@ -532,7 +533,7 @@ export class DiagnosticService {
   }
 
   /**
-   * Finds the range for a key in a document
+   * Finds the range for a key in a document using jsonc.findNodeAtLocation
    */
   private findKeyRange(
     document: vscode.TextDocument,
@@ -546,62 +547,27 @@ export class DiagnosticService {
 
     const keyParts = key.split('.');
 
-    let foundRange: vscode.Range | undefined;
-    jsonc.visit(text, {
-      onObjectProperty: (
-        property,
-        offset,
-        length,
-        startLine,
-        startCharacter
-      ) => {
-        if (foundRange) {
-          return;
-        }
+    // Use findNodeAtLocation directly for path lookup
+    const node = jsonc.findNodeAtLocation(rootNode, keyParts);
 
-        const keyNode = jsonc.findNodeAtOffset(rootNode, offset);
-        if (!keyNode) {
-          return;
-        }
+    if (node?.parent?.type === 'property') {
+      const propertyNode = node.parent;
+      const keyNode = propertyNode.children?.[0];
 
-        const nodePath = jsonc.getNodePath(keyNode);
-
-        // For top-level keys
-        if (
-          keyParts.length === 1 &&
-          nodePath.length === 1 &&
-          property === keyParts[0]
-        ) {
-          foundRange = this.createRange(startLine, startCharacter, length);
-          return;
-        }
-
-        // For nested keys
-        if (keyParts.length > 1 && property === keyParts[keyParts.length - 1]) {
-          // Check if the path matches
-          const pathMatches = nodePath.length === keyParts.length;
-          if (pathMatches) {
-            let matches = true;
-            for (let i = 0; i < nodePath.length; i++) {
-              if (nodePath[i] !== keyParts[i]) {
-                matches = false;
-                break;
-              }
-            }
-
-            if (matches) {
-              foundRange = this.createRange(startLine, startCharacter, length);
-            }
-          }
-        }
+      if (keyNode) {
+        const startPosition = document.positionAt(keyNode.offset);
+        const endPosition = document.positionAt(
+          keyNode.offset + keyNode.length
+        );
+        return new vscode.Range(startPosition, endPosition);
       }
-    });
+    }
 
-    return foundRange;
+    return undefined;
   }
 
   /**
-   * Finds the opening brace in a document
+   * Finds the opening brace in a document with improved jsonc usage
    */
   private findOpeningBraceRange(
     document: vscode.TextDocument
@@ -612,9 +578,10 @@ export class DiagnosticService {
       return undefined;
     }
 
-    // Get the range for the opening brace
-    const position = document.positionAt(rootNode.offset);
-    return new vscode.Range(position, position.translate(0, 1));
+    // Get more precise position information using node offset
+    const startPos = document.positionAt(rootNode.offset);
+    // The opening brace is exactly at the node offset
+    return new vscode.Range(startPos, startPos.translate(0, 1));
   }
 
   /**
