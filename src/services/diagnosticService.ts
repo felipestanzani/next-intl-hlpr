@@ -8,6 +8,7 @@ import {NextIntlConfig, MessageConfig} from '../interfaces/nextIntlConfig';
 import {DiagnosticInfo} from '../interfaces/diagnostics';
 import {TranslationComparisonUtils} from '../utils/translationComparisonUtils';
 import {DiagnosticMessageFactory} from '../utils/diagnosticMessageFactory';
+import {Translation} from '../interfaces/translation';
 
 export class DiagnosticService {
   private readonly diagnosticCollection: vscode.DiagnosticCollection;
@@ -20,6 +21,23 @@ export class DiagnosticService {
   ) {
     this.diagnosticCollection =
       vscode.languages.createDiagnosticCollection('next-intl-hlpr');
+  }
+
+  /**
+   * Helper method to get all translations or a specific translation by locale
+   * @param locale Optional locale to retrieve a specific translation
+   * @returns All translations or a specific translation if locale is provided
+   */
+  private getTranslations(
+    locale?: string
+  ): Translation[] | Translation | undefined {
+    const allTranslations = this.translationService.getAllTranslations();
+
+    if (locale) {
+      return allTranslations.find((t: Translation) => t.locale === locale);
+    }
+
+    return allTranslations;
   }
 
   /**
@@ -125,8 +143,8 @@ export class DiagnosticService {
       }
 
       // Get all translations to determine available locales
-      const allTranslations = this.translationService.getAllTranslations();
-      const locales = allTranslations.map((t) => t.locale);
+      const allTranslations = this.getTranslations() as Translation[];
+      const locales = allTranslations.map((t: Translation) => t.locale);
 
       // Update diagnostics for all translation files
       await this.updateDiagnosticsForAllLocales(config, messageConfig, locales);
@@ -179,10 +197,7 @@ export class DiagnosticService {
       return;
     }
 
-    const allTranslations = this.translationService.getAllTranslations();
-    const currentTranslation = allTranslations.find(
-      (t) => t.locale === currentLocale
-    );
+    const currentTranslation = this.getTranslations(currentLocale);
     if (!currentTranslation) {
       return;
     }
@@ -232,7 +247,7 @@ export class DiagnosticService {
       missingParentKeys: new Map()
     };
 
-    const allTranslations = this.translationService.getAllTranslations();
+    const allTranslations = this.getTranslations() as Translation[];
 
     for (const translation of allTranslations) {
       if (translation.locale === currentLocale) {
@@ -360,109 +375,133 @@ export class DiagnosticService {
   ): vscode.Diagnostic[] {
     const diagnostics: vscode.Diagnostic[] = [];
 
-    // Add diagnostics for all types of issues
-    this.addDiagnosticsForNestedKeys(
+    // Create processors for each diagnostic type
+    const processors = this.createDiagnosticProcessors();
+
+    // Process diagnostics for each type of issue using a generic approach
+    this.processDiagnosticsGeneric(
       document,
       diagnosticInfo.missingNestedKeysByParent,
-      diagnostics
+      diagnostics,
+      processors.nestedKeys
     );
 
-    this.addDiagnosticsForMissingTranslations(
+    this.processDiagnosticsGeneric(
       document,
       diagnosticInfo.missingTranslationsByKey,
-      diagnostics
+      diagnostics,
+      processors.translationKeys
     );
 
-    this.addDiagnosticsForMissingParentKeys(
-      document,
-      diagnosticInfo.missingParentKeys,
-      diagnostics
-    );
+    // Process parent keys if any exist
+    if (diagnosticInfo.missingParentKeys.size > 0) {
+      processors.parentKeys(
+        document,
+        diagnosticInfo.missingParentKeys,
+        diagnostics
+      );
+    }
 
     return diagnostics;
   }
 
   /**
-   * Adds diagnostics for missing nested keys
+   * Creates processors for different diagnostic types
+   * @returns An object containing processors for different diagnostic types
    */
-  private addDiagnosticsForNestedKeys(
-    document: vscode.TextDocument,
-    missingNestedKeysByParent: Map<string, Map<string, Set<string>>>,
-    diagnostics: vscode.Diagnostic[]
-  ): void {
-    for (const [parentKey, localeKeys] of missingNestedKeysByParent) {
-      this.addDiagnostic(
-        document,
-        parentKey,
-        DiagnosticMessageFactory.MessageType.MISSING_NESTED_KEYS,
-        {
+  private createDiagnosticProcessors() {
+    return {
+      nestedKeys: (
+        document: vscode.TextDocument,
+        parentKey: string,
+        localeKeys: Map<string, Set<string>>,
+        diagnostics: vscode.Diagnostic[]
+      ) => {
+        this.addDiagnostic(
+          document,
           parentKey,
-          localeKeys
-        },
-        diagnostics
-      );
-    }
-  }
-
-  /**
-   * Adds diagnostics for missing translations
-   */
-  private addDiagnosticsForMissingTranslations(
-    document: vscode.TextDocument,
-    missingTranslationsByKey: Map<string, Set<string>>,
-    diagnostics: vscode.Diagnostic[]
-  ): void {
-    for (const [key, missingLocales] of missingTranslationsByKey) {
-      // Check if this is a parent key (marked with __PARENT__ prefix)
-      if (key.startsWith('__PARENT__')) {
-        const actualKey = key.replace('__PARENT__', '');
-        this.addDiagnostic(
-          document,
-          actualKey,
-          DiagnosticMessageFactory.MessageType.MISSING_PARENT_KEY,
+          DiagnosticMessageFactory.MessageType.MISSING_NESTED_KEYS,
           {
-            key: actualKey,
-            missingLocales
+            parentKey,
+            localeKeys
           },
           diagnostics
         );
-      } else {
-        // Regular translation key
-        this.addDiagnostic(
-          document,
-          key,
-          DiagnosticMessageFactory.MessageType.MISSING_TRANSLATION,
-          {
+      },
+
+      translationKeys: (
+        document: vscode.TextDocument,
+        key: string,
+        missingLocales: Set<string>,
+        diagnostics: vscode.Diagnostic[]
+      ) => {
+        // Check if this is a parent key (marked with __PARENT__ prefix)
+        if (key.startsWith('__PARENT__')) {
+          const actualKey = key.replace('__PARENT__', '');
+          this.addDiagnostic(
+            document,
+            actualKey,
+            DiagnosticMessageFactory.MessageType.MISSING_PARENT_KEY,
+            {
+              key: actualKey,
+              missingLocales
+            },
+            diagnostics
+          );
+        } else {
+          // Regular translation key
+          this.addDiagnostic(
+            document,
             key,
-            missingLocales,
-            isParentKey: false
-          },
-          diagnostics
-        );
+            DiagnosticMessageFactory.MessageType.MISSING_TRANSLATION,
+            {
+              key,
+              missingLocales,
+              isParentKey: false
+            },
+            diagnostics
+          );
+        }
+      },
+
+      parentKeys: (
+        document: vscode.TextDocument,
+        missingParentKeys: Map<string, Set<string>>,
+        diagnostics: vscode.Diagnostic[]
+      ) => {
+        // Find the opening brace of the JSON file using jsonc-parser
+        const range = this.findOpeningBraceRange(document);
+        if (range) {
+          const message = DiagnosticMessageFactory.createMessage(
+            DiagnosticMessageFactory.MessageType.MISSING_PARENT_KEYS,
+            missingParentKeys
+          );
+          diagnostics.push(this.createDiagnostic(range, message));
+        }
       }
-    }
+    };
   }
 
   /**
-   * Adds diagnostics for missing parent keys
+   * Generic method to process diagnostics based on a provided processor function
+   * @param document The document to add diagnostics to
+   * @param data The data to process
+   * @param diagnostics The array to add diagnostics to
+   * @param processorFn The function to process each item
    */
-  private addDiagnosticsForMissingParentKeys(
+  private processDiagnosticsGeneric<T>(
     document: vscode.TextDocument,
-    missingParentKeys: Map<string, Set<string>>,
-    diagnostics: vscode.Diagnostic[]
+    data: Map<string, T>,
+    diagnostics: vscode.Diagnostic[],
+    processorFn: (
+      document: vscode.TextDocument,
+      key: string,
+      value: T,
+      diagnostics: vscode.Diagnostic[]
+    ) => void
   ): void {
-    if (missingParentKeys.size === 0) {
-      return;
-    }
-
-    // Find the opening brace of the JSON file using jsonc-parser
-    const range = this.findOpeningBraceRange(document);
-    if (range) {
-      const message = DiagnosticMessageFactory.createMessage(
-        DiagnosticMessageFactory.MessageType.MISSING_PARENT_KEYS,
-        missingParentKeys
-      );
-      diagnostics.push(this.createDiagnostic(range, message));
+    for (const [key, value] of data) {
+      processorFn(document, key, value, diagnostics);
     }
   }
 
