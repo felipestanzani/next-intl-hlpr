@@ -631,20 +631,6 @@ export class DiagnosticService {
   }
 
   /**
-   * Creates a Range object from start position and length
-   */
-  private createRange(
-    startLine: number,
-    startCharacter: number,
-    length: number
-  ): vscode.Range {
-    return new vscode.Range(
-      new vscode.Position(startLine, startCharacter),
-      new vscode.Position(startLine, startCharacter + length)
-    );
-  }
-
-  /**
    * Adds a diagnostic for a key in a document
    */
   private addDiagnostic(
