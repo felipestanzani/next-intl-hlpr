@@ -149,11 +149,19 @@ export class DiagnosticService {
       const allTranslations = this.getTranslations() as Translation[];
       const locales = allTranslations.map((t: Translation) => t.locale);
 
+      const allKeys = await this.getAllTranslationKeys(
+        locales,
+        config,
+        messageConfig,
+        document
+      );
+
       // Update diagnostics for all translation files
       await this.updateDiagnosticsForAllLocales(
         config,
         messageConfig,
         locales,
+        allKeys,
         document,
         rootNode
       );
@@ -180,6 +188,7 @@ export class DiagnosticService {
     config: NextIntlConfig,
     messageConfig: MessageConfig,
     locales: string[],
+    allKeys: Map<string, string[]>,
     changedDocument?: vscode.TextDocument,
     rootNode?: jsonc.Node
   ): Promise<void> {
@@ -189,10 +198,10 @@ export class DiagnosticService {
 
       try {
         if (changedDocument && uri.fsPath === changedDocument.uri.fsPath) {
-          await this.updateFileDiagnostics(changedDocument, rootNode);
+          await this.updateFileDiagnostics(changedDocument, allKeys, rootNode);
         } else {
           const doc = await vscode.workspace.openTextDocument(uri);
-          await this.updateFileDiagnostics(doc);
+          await this.updateFileDiagnostics(doc, allKeys);
         }
       } catch (error) {
         // File might not exist yet, that's okay
@@ -206,6 +215,7 @@ export class DiagnosticService {
    */
   private async updateFileDiagnostics(
     document: vscode.TextDocument,
+    allKeys: Map<string, string[]>,
     rootNode?: jsonc.Node
   ): Promise<void> {
     const currentLocale = this.getCurrentLocale(document.uri.fsPath);
@@ -226,15 +236,13 @@ export class DiagnosticService {
       return;
     }
 
-    // Extract content from the rootNode instead of parsing again
-    const currentContent = jsonc.getNodeValue(effectiveRootNode);
-    const currentKeys = TranslationComparisonUtils.getAllKeys(currentContent);
+    const currentKeys = allKeys.get(currentLocale) || [];
 
-    const diagnosticInfo = await this.analyzeMissingTranslations(
+    const diagnosticInfo = this.analyzeMissingTranslations(
       currentLocale,
       currentTranslation,
       currentKeys,
-      document
+      allKeys
     );
 
     const diagnostics = this.createDiagnostics(
@@ -253,12 +261,12 @@ export class DiagnosticService {
   /**
    * Analyzes missing translations between locales
    */
-  private async analyzeMissingTranslations(
+  private analyzeMissingTranslations(
     currentLocale: string,
     currentTranslation: any,
     currentKeys: string[],
-    document: vscode.TextDocument
-  ): Promise<DiagnosticInfo> {
+    allKeys: Map<string, string[]>
+  ): DiagnosticInfo {
     const diagnosticInfo: DiagnosticInfo = {
       missingNestedKeysByParent: new Map(),
       missingTranslationsByKey: new Map(),
@@ -280,12 +288,15 @@ export class DiagnosticService {
       );
 
       // Compare nested keys between locales
-      await this.compareTranslationKeys(
-        translation,
-        currentKeys,
-        document,
-        diagnosticInfo
-      );
+      const otherKeys = allKeys.get(translation.locale);
+      if (otherKeys) {
+        this.compareTranslationKeys(
+          translation.locale,
+          otherKeys,
+          currentKeys,
+          diagnosticInfo
+        );
+      }
     }
 
     return diagnosticInfo;
@@ -294,58 +305,27 @@ export class DiagnosticService {
   /**
    * Compares translation keys between locales to find missing keys and nested structures
    */
-  private async compareTranslationKeys(
-    translation: any,
+  private compareTranslationKeys(
+    otherLocale: string,
+    otherKeys: string[],
     currentKeys: string[],
-    document: vscode.TextDocument,
     diagnosticInfo: DiagnosticInfo
-  ): Promise<void> {
-    const [config, messageConfig] = await this.getConfigurations();
-    if (!config || !messageConfig) {
-      return;
-    }
-
-    // Get keys from the other locale's translation file
-    const otherFilePath = this.resolveMessagePath(
-      config,
-      messageConfig,
-      translation.locale
+  ): void {
+    // Compare nested keys using utility class
+    TranslationComparisonUtils.compareNestedKeys(
+      otherKeys,
+      currentKeys,
+      otherLocale,
+      diagnosticInfo.missingNestedKeysByParent
     );
 
-    try {
-      const otherFileContent = Buffer.from(
-        await vscode.workspace.fs.readFile(vscode.Uri.file(otherFilePath))
-      ).toString();
-
-      // Parse once and extract value
-      const otherRootNode = this.parseJsoncDocument(otherFileContent);
-      if (!otherRootNode) {
-        this.logger.log(`Invalid JSON in file: ${otherFilePath}`);
-        return;
-      }
-      const otherContent = jsonc.getNodeValue(otherRootNode);
-
-      // Get all keys using utility class
-      const otherKeys = TranslationComparisonUtils.getAllKeys(otherContent);
-
-      // Compare nested keys using utility class
-      TranslationComparisonUtils.compareNestedKeys(
-        otherKeys,
-        currentKeys,
-        translation.locale,
-        diagnosticInfo.missingNestedKeysByParent
-      );
-
-      // Compare parent keys using utility class
-      TranslationComparisonUtils.compareParentKeys(
-        otherKeys,
-        currentKeys,
-        translation.locale,
-        diagnosticInfo.missingParentKeys
-      );
-    } catch (error) {
-      this.logger.log(`Error comparing translation keys: ${error}`);
-    }
+    // Compare parent keys using utility class
+    TranslationComparisonUtils.compareParentKeys(
+      otherKeys,
+      currentKeys,
+      otherLocale,
+      diagnosticInfo.missingParentKeys
+    );
   }
 
   /**
@@ -671,5 +651,45 @@ export class DiagnosticService {
       );
       diagnostics.push(this.createDiagnostic(range, message));
     }
+  }
+
+  /**
+   * Fetches all keys from all translation files.
+   */
+  private async getAllTranslationKeys(
+    locales: string[],
+    config: NextIntlConfig,
+    messageConfig: MessageConfig,
+    changedDocument?: vscode.TextDocument
+  ): Promise<Map<string, string[]>> {
+    const allKeys = new Map<string, string[]>();
+
+    for (const locale of locales) {
+      const filePath = this.resolveMessagePath(config, messageConfig, locale);
+      let text: string;
+
+      if (changedDocument && changedDocument.uri.fsPath === filePath) {
+        text = changedDocument.getText();
+      } else {
+        try {
+          const fileContent = await vscode.workspace.fs.readFile(
+            vscode.Uri.file(filePath)
+          );
+          text = Buffer.from(fileContent).toString('utf-8');
+        } catch (error) {
+          this.logger.log(`Could not read file ${filePath}: ${error}`);
+          continue;
+        }
+      }
+
+      const rootNode = this.parseJsoncDocument(text);
+      if (rootNode) {
+        const jsonContent = jsonc.getNodeValue(rootNode);
+        const keys = TranslationComparisonUtils.getAllKeys(jsonContent);
+        allKeys.set(locale, keys);
+      }
+    }
+
+    return allKeys;
   }
 }

@@ -1,3 +1,4 @@
+import {visit} from 'jsonc-parser';
 /**
  * Utility class for translation key comparison operations
  */
@@ -45,8 +46,12 @@ export class TranslationComparisonUtils {
     missingParentKeys: Map<string, Set<string>>
   ): void {
     // Get parent keys from both files
-    const currentParentKeys = this.extractParentKeys(currentKeys);
-    const otherParentKeys = this.extractParentKeys(otherKeys);
+    const currentParentKeys = Array.from(
+      this.groupKeysByParent(currentKeys).keys()
+    );
+    const otherParentKeys = Array.from(
+      this.groupKeysByParent(otherKeys).keys()
+    );
 
     // Find parent keys that exist in other file but not in current file
     for (const parentKey of otherParentKeys) {
@@ -57,23 +62,6 @@ export class TranslationComparisonUtils {
         missingParentKeys.get(parentKey)!.add(locale);
       }
     }
-  }
-
-  /**
-   * Extracts parent keys from a list of keys
-   */
-  public static extractParentKeys(keys: string[]): string[] {
-    const parentKeys = new Set<string>();
-    for (const key of keys) {
-      const keyParts = key.split('.');
-      if (keyParts.length > 1) {
-        parentKeys.add(keyParts[0]);
-      } else {
-        // Top-level keys are also parent keys
-        parentKeys.add(key);
-      }
-    }
-    return Array.from(parentKeys);
   }
 
   /**
@@ -97,23 +85,23 @@ export class TranslationComparisonUtils {
   /**
    * Gets all keys from an object, flattened with dot notation
    */
-  public static getAllKeys(obj: any, prefix = ''): string[] {
+  public static getAllKeys(obj: any): string[] {
     const keys: string[] = [];
-
-    for (const key in obj) {
-      if (Object.hasOwn(obj, key)) {
-        const newPath = prefix ? `${prefix}.${key}` : key;
-        if (
-          typeof obj[key] === 'object' &&
-          obj[key] !== null &&
-          !Array.isArray(obj[key])
-        ) {
-          keys.push(...this.getAllKeys(obj[key], newPath));
-        } else {
-          keys.push(newPath);
-        }
+    const jsonString = JSON.stringify(obj, null, 2);
+    visit(jsonString, {
+      onObjectProperty: (
+        property,
+        _offset,
+        _length,
+        _startLine,
+        _startCharacter,
+        path
+      ) => {
+        const currentPath = path();
+        const keyPath = [...currentPath, property].join('.');
+        keys.push(keyPath);
       }
-    }
+    });
 
     return keys;
   }
