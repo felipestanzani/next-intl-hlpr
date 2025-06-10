@@ -111,7 +111,7 @@ export class DiagnosticService {
       }
 
       await this.translationService.reloadTranslations();
-      await this.updateDiagnostics(document);
+      await this.updateDiagnostics(document, rootNode);
     } catch (error) {
       this.logger.log(`Error handling file change: ${error}`);
     }
@@ -129,7 +129,10 @@ export class DiagnosticService {
   /**
    * Update diagnostics for a document and related files
    */
-  async updateDiagnostics(document: vscode.TextDocument): Promise<void> {
+  async updateDiagnostics(
+    document: vscode.TextDocument,
+    rootNode?: jsonc.Node
+  ): Promise<void> {
     if (document.languageId !== 'json') {
       return;
     }
@@ -147,7 +150,13 @@ export class DiagnosticService {
       const locales = allTranslations.map((t: Translation) => t.locale);
 
       // Update diagnostics for all translation files
-      await this.updateDiagnosticsForAllLocales(config, messageConfig, locales);
+      await this.updateDiagnosticsForAllLocales(
+        config,
+        messageConfig,
+        locales,
+        document,
+        rootNode
+      );
     } catch (error) {
       this.logger.log('Error updating diagnostics', error);
     }
@@ -170,15 +179,21 @@ export class DiagnosticService {
   private async updateDiagnosticsForAllLocales(
     config: NextIntlConfig,
     messageConfig: MessageConfig,
-    locales: string[]
+    locales: string[],
+    changedDocument?: vscode.TextDocument,
+    rootNode?: jsonc.Node
   ): Promise<void> {
     for (const locale of locales) {
       const filePath = this.resolveMessagePath(config, messageConfig, locale);
       const uri = vscode.Uri.file(filePath);
 
       try {
-        const doc = await vscode.workspace.openTextDocument(uri);
-        await this.updateFileDiagnostics(doc);
+        if (changedDocument && uri.fsPath === changedDocument.uri.fsPath) {
+          await this.updateFileDiagnostics(changedDocument, rootNode);
+        } else {
+          const doc = await vscode.workspace.openTextDocument(uri);
+          await this.updateFileDiagnostics(doc);
+        }
       } catch (error) {
         // File might not exist yet, that's okay
         this.logger.log(`Could not open file ${filePath}: ${error}`);
@@ -190,7 +205,8 @@ export class DiagnosticService {
    * Update diagnostics for a specific translation file
    */
   private async updateFileDiagnostics(
-    document: vscode.TextDocument
+    document: vscode.TextDocument,
+    rootNode?: jsonc.Node
   ): Promise<void> {
     const currentLocale = this.getCurrentLocale(document.uri.fsPath);
     if (!currentLocale) {
@@ -203,14 +219,15 @@ export class DiagnosticService {
     }
 
     // Parse the document using jsonc-parser with location information
-    const rootNode = this.parseJsoncDocument(document.getText());
-    if (!rootNode) {
+    const effectiveRootNode =
+      rootNode || this.parseJsoncDocument(document.getText());
+    if (!effectiveRootNode) {
       this.logger.log(`Failed to parse JSON document: ${document.uri.fsPath}`);
       return;
     }
 
     // Extract content from the rootNode instead of parsing again
-    const currentContent = jsonc.getNodeValue(rootNode);
+    const currentContent = jsonc.getNodeValue(effectiveRootNode);
     const currentKeys = TranslationComparisonUtils.getAllKeys(currentContent);
 
     const diagnosticInfo = await this.analyzeMissingTranslations(
@@ -223,7 +240,8 @@ export class DiagnosticService {
     const diagnostics = this.createDiagnostics(
       document,
       diagnosticInfo,
-      currentKeys
+      currentKeys,
+      effectiveRootNode
     );
 
     this.logger.log(
@@ -301,6 +319,10 @@ export class DiagnosticService {
 
       // Parse once and extract value
       const otherRootNode = this.parseJsoncDocument(otherFileContent);
+      if (!otherRootNode) {
+        this.logger.log(`Invalid JSON in file: ${otherFilePath}`);
+        return;
+      }
       const otherContent = jsonc.getNodeValue(otherRootNode);
 
       // Get all keys using utility class
@@ -372,12 +394,13 @@ export class DiagnosticService {
   private createDiagnostics(
     document: vscode.TextDocument,
     diagnosticInfo: DiagnosticInfo,
-    currentKeys: string[]
+    currentKeys: string[],
+    rootNode: jsonc.Node | undefined
   ): vscode.Diagnostic[] {
     const diagnostics: vscode.Diagnostic[] = [];
 
     // Create processors for each diagnostic type
-    const processors = this.createDiagnosticProcessors();
+    const processors = this.createDiagnosticProcessors(rootNode);
 
     // Process diagnostics for each type of issue using a generic approach
     this.processDiagnosticsGeneric(
@@ -410,7 +433,7 @@ export class DiagnosticService {
    * Creates processors for different diagnostic types
    * @returns An object containing processors for different diagnostic types
    */
-  private createDiagnosticProcessors() {
+  private createDiagnosticProcessors(rootNode: jsonc.Node | undefined) {
     return {
       nestedKeys: (
         document: vscode.TextDocument,
@@ -426,7 +449,8 @@ export class DiagnosticService {
             parentKey,
             localeKeys
           },
-          diagnostics
+          diagnostics,
+          rootNode
         );
       },
 
@@ -447,7 +471,8 @@ export class DiagnosticService {
               key: actualKey,
               missingLocales
             },
-            diagnostics
+            diagnostics,
+            rootNode
           );
         } else {
           // Regular translation key
@@ -460,7 +485,8 @@ export class DiagnosticService {
               missingLocales,
               isParentKey: false
             },
-            diagnostics
+            diagnostics,
+            rootNode
           );
         }
       },
@@ -471,7 +497,7 @@ export class DiagnosticService {
         diagnostics: vscode.Diagnostic[]
       ) => {
         // Find the opening brace of the JSON file using jsonc-parser
-        const range = this.findOpeningBraceRange(document);
+        const range = this.findOpeningBraceRange(document, rootNode);
         if (range) {
           const message = DiagnosticMessageFactory.createMessage(
             DiagnosticMessageFactory.MessageType.MISSING_PARENT_KEYS,
@@ -537,18 +563,19 @@ export class DiagnosticService {
    */
   private findKeyRange(
     document: vscode.TextDocument,
-    key: string
+    key: string,
+    rootNode?: jsonc.Node
   ): vscode.Range | undefined {
     const text = document.getText();
-    const rootNode = this.parseJsoncDocument(text);
-    if (!rootNode) {
+    const effectiveRootNode = rootNode || this.parseJsoncDocument(text);
+    if (!effectiveRootNode) {
       return undefined;
     }
 
     const keyParts = key.split('.');
 
     // Use findNodeAtLocation directly for path lookup
-    const node = jsonc.findNodeAtLocation(rootNode, keyParts);
+    const node = jsonc.findNodeAtLocation(effectiveRootNode, keyParts);
 
     if (node?.parent?.type === 'property') {
       const propertyNode = node.parent;
@@ -570,16 +597,17 @@ export class DiagnosticService {
    * Finds the opening brace in a document with improved jsonc usage
    */
   private findOpeningBraceRange(
-    document: vscode.TextDocument
+    document: vscode.TextDocument,
+    rootNode?: jsonc.Node
   ): vscode.Range | undefined {
     const text = document.getText();
-    const rootNode = this.parseJsoncDocument(text);
-    if (!rootNode || rootNode.type !== 'object') {
+    const effectiveRootNode = rootNode || this.parseJsoncDocument(text);
+    if (!effectiveRootNode || effectiveRootNode.type !== 'object') {
       return undefined;
     }
 
     // Get more precise position information using node offset
-    const startPos = document.positionAt(rootNode.offset);
+    const startPos = document.positionAt(effectiveRootNode.offset);
     // The opening brace is exactly at the node offset
     return new vscode.Range(startPos, startPos.translate(0, 1));
   }
@@ -617,17 +645,11 @@ export class DiagnosticService {
   /**
    * Parses a JSON document using jsonc-parser
    * @param text The document text to parse
-   * @param withLocationInfo Whether to include location information
    * @returns The parsed document
    */
-  private parseJsoncDocument(
-    text: string,
-    withLocationInfo: boolean = true
-  ): any {
+  private parseJsoncDocument(text: string): jsonc.Node | undefined {
     const options = {allowTrailingComma: true};
-    return withLocationInfo
-      ? jsonc.parseTree(text, [], options)
-      : jsonc.parse(text, [], options);
+    return jsonc.parseTree(text, [], options);
   }
 
   /**
@@ -638,9 +660,10 @@ export class DiagnosticService {
     key: string,
     messageType: (typeof DiagnosticMessageFactory.MessageType)[keyof typeof DiagnosticMessageFactory.MessageType],
     messageData: any,
-    diagnostics: vscode.Diagnostic[]
+    diagnostics: vscode.Diagnostic[],
+    rootNode?: jsonc.Node
   ): void {
-    const range = this.findKeyRange(document, key);
+    const range = this.findKeyRange(document, key, rootNode);
     if (range) {
       const message = DiagnosticMessageFactory.createMessage(
         messageType,
